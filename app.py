@@ -16,7 +16,8 @@ db = SQLAlchemy(app)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
+    password_hash = db.Column(db.String(300), nullable=False)  # <-- cambia 128 in 300
+
 
 class Bar(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -122,6 +123,8 @@ def simula():
 
 # === SETUP DB ===
 with app.app_context():
+    db.create_all()
+    db.drop_all()
     db.create_all()
 
     if not Bar.query.first():
