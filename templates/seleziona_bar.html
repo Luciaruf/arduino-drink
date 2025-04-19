@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Seleziona Bar</title>
+</head>
+<body>
+    <h1>In quale bar ti trovi?</h1>
+    <form method="POST">
+        <select name="bar" required>
+            {% for bar in bar_list %}
+                <option value="{{ bar.id }}">{{ bar.nome }} - {{ bar.indirizzo }}</option>
+            {% endfor %}
+        </select>
+        <br><br>
+        <button type="submit">Conferma</button>
+    </form>
+</body>
+</html>
