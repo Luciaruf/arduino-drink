@@ -1,51 +1,48 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAFESIP - Home</title>
-</head>
-<body>
-    <header>
-        <div>
-            <h1>SAFESIP</h1>
-            <nav>
-                <a href="{{ url_for('register') }}">Registrati</a>
-                <a href="{{ url_for('login') }}">Login</a>
-            </nav>
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Home{% endblock %}
+
+{% block content %}
+    <section class="text-center mb-5">
+        <h1 class="display-4 mb-4">Il primo sottobicchiere smart</h1>
+        <p class="lead">Un dispositivo per offrire ai consumatori un'esperienza innovativa e sicura.</p>
+    </section>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h3 class="card-title">HAI UN'ATTIVITÀ COMMERCIALE?</h3>
+                    <p class="card-text">Scopri come diventare partner SAFESIP e offrire un servizio innovativo ai tuoi clienti.</p>
+                    <a href="https://safesip.it/partner" class="btn btn-primary" target="_blank">Diventa partner</a>
+                </div>
+            </div>
         </div>
-    </header>
 
-    <main>
-        <section id="concept">
-            <h2>Il primo sottobicchiere smart</h2>
-            <p>Un dispositivo per offrire ai consumatori un'esperienza innovativa e sicura.</p>
-            
-            <section>
-                <h3>HAI UN'ATTIVITÀ COMMERCIALE?</h3>
-                <p>Scopri come diventare partner SAFESIP e offrire un servizio innovativo ai tuoi clienti.</p>
-                <a href="https://safesip.it/partner" target="_blank">Diventa partner</a>
-            </section>
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h3 class="card-title">SEI UN CONSUMATORE?</h3>
+                    <p class="card-text">Registrati per accedere a tutti i servizi SAFESIP e vivere un'esperienza di consumo responsabile.</p>
+                    <a href="{{ url_for('register') }}" class="btn btn-primary">Registrati</a>
+                </div>
+            </div>
+        </div>
+    </div>
 
-            <section>
-                <h3>SEI UN CONSUMATORE?</h3>
-                <p>Registrati per accedere a tutti i servizi SAFESIP e vivere un'esperienza di consumo responsabile.</p>
-                <a href="{{ url_for('register') }}">Registrati</a>
-            </section>
-        </section>
-
-        <section>
-            <h2>BAR CONVENZIONATI</h2>
-            <ul>
-                {% for bar in bars %}
-                    <li>{{ bar.nome }} - {{ bar.indirizzo }}</li>
-                {% endfor %}
-            </ul>
-        </section>
-    </main>
-
-    <footer>
-        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
-    </footer>
-</body>
-</html>
+    <section class="mt-5">
+        <h2 class="text-center mb-4">BAR CONVENZIONATI</h2>
+        <div class="row">
+            {% for bar in bars %}
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ bar.nome }}</h5>
+                            <p class="card-text">{{ bar.indirizzo }}</p>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+{% endblock %}

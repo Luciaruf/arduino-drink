@@ -1,83 +1,65 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAFESIP - Simulazione</title>
-</head>
-<body>
-    <header>
-        <nav>
-            <a href="{{ url_for('home') }}">←</a>
-            <a href="{{ url_for('gamification') }}">Storico</a>
-            <a href="{{ url_for('logout') }}">Logout</a>
-        </nav>
-    </header>
+{% extends "base.html" %}
 
-    <main>
-        <section>
-            <h1>Simulazione livello alcolemico</h1>
-            <p>Ti trovi presso: <strong>{{ bar.nome }}</strong> - {{ bar.indirizzo }}</p>
+{% block title %}SAFESIP - Simulazione{% endblock %}
 
-            <form method="post" action="{{ url_for('simula') }}">
-                <div>
-                    <label for="genere">Genere:</label>
-                    <select name="genere" id="genere" required>
-                        <option value="uomo">Uomo</option>
-                        <option value="donna">Donna</option>
-                    </select>
-                </div>
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">Simulazione Tasso Alcolemico</h2>
+                <h3 class="h5 mb-3">{{ bar.nome }}</h3>
 
-                <div>
-                    <label for="peso">Peso (kg):</label>
-                    <input type="number" step="0.1" name="peso" id="peso" required>
-                </div>
+                <form method="post" action="{{ url_for('simula') }}">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="drink" class="form-label">Seleziona Drink</label>
+                            <select class="form-select" id="drink" name="drink" required>
+                                <option value="">Scegli un drink...</option>
+                                {% for drink in drinks %}
+                                    <option value="{{ drink.id }}">{{ drink.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="genere" class="form-label">Genere</label>
+                            <select class="form-select" id="genere" name="genere" required>
+                                <option value="uomo">Uomo</option>
+                                <option value="donna">Donna</option>
+                            </select>
+                        </div>
+                    </div>
 
-                <div>
-                    <label for="stomaco">Stato stomaco:</label>
-                    <select name="stomaco" id="stomaco" required>
-                        <option value="vuoto">Vuoto</option>
-                        <option value="pieno">Pieno</option>
-                    </select>
-                </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="peso" class="form-label">Peso (kg)</label>
+                            <input type="number" class="form-control" id="peso" name="peso" min="40" max="150" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="stomaco" class="form-label">Stato stomaco</label>
+                            <select class="form-select" id="stomaco" name="stomaco" required>
+                                <option value="pieno">Pieno</option>
+                                <option value="vuoto">Vuoto</option>
+                            </select>
+                        </div>
+                    </div>
 
-                <div>
-                    <label for="drink">Seleziona Drink:</label>
-                    <select name="drink" id="drink" required>
-                        {% for drink in drinks %}
-                            <option value="{{ drink.id }}">{{ drink.nome }} - {{ drink.ingredienti }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">Calcola</button>
+                    </div>
+                </form>
 
-                <button type="submit">SIMULA</button>
-            </form>
-
-            {% if tasso is not none %}
-                <section>
-                    <p>Il tuo tasso alcolemico stimato è: <strong>{{ tasso }}</strong> g/l</p>
-                    
-                    <p>
-                        {% if tasso < 0.5 %}
-                            < 0,5 | vicino a 0,5 | > 0,5
-                            🚗
-                        {% elif tasso >= 0.5 and tasso < 0.6 %}
-                            < 0,5 | vicino a 0,5 | > 0,5
-                            ⚠️
-                        {% else %}
-                            < 0,5 | vicino a 0,5 | > 0,5
-                            ❌
-                        {% endif %}
-                    </p>
-
-                    <p>Tempo stimato per tornare sotto il limite: ???</p>
-                </section>
-            {% endif %}
-        </section>
-    </main>
-
-    <footer>
-        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
-    </footer>
-</body>
-</html>
+                {% if tasso is not none %}
+                    <div class="alert alert-info mt-4">
+                        <h4 class="alert-heading">Risultato Simulazione</h4>
+                        <p class="mb-0">
+                            Drink: {{ drink_selezionato.nome }}<br>
+                            Tasso alcolemico stimato: {{ tasso }} g/L
+                        </p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

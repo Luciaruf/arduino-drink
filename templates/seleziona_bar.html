@@ -1,52 +1,58 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAFESIP - Seleziona Bar</title>
-</head>
-<body>
-    <header>
-        <nav>
-            <a href="{{ url_for('home') }}">←</a>
-            <a href="{{ url_for('logout') }}">Logout</a>
-        </nav>
-    </header>
+{% extends "base.html" %}
 
-    <main>
-        <section>
-            {% if not citta_selezionata %}
-                <h1>IN CHE CITTÀ TI TROVI?</h1>
-                <form method="post" action="{{ url_for('seleziona_bar') }}">
-                    <div>
-                        <select name="citta" required>
-                            <option value="">Seleziona città</option>
-                            {% for citta in citta_list %}
-                                <option value="{{ citta }}">{{ citta }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button type="submit">CONFERMA</button>
-                </form>
-            {% else %}
-                <h1>DOVE TI TROVI?</h1>
-                <form method="post" action="{{ url_for('seleziona_bar') }}">
-                    <div>
-                        <select name="bar" required>
-                            <option value="">Seleziona bar</option>
+{% block title %}SAFESIP - Seleziona Bar{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">Seleziona un Bar</h2>
+                
+                {% if not citta_selezionata %}
+                    <form method="post" action="{{ url_for('seleziona_bar') }}">
+                        <div class="mb-3">
+                            <label for="citta" class="form-label">Seleziona la città</label>
+                            <select class="form-select" id="citta" name="citta" required>
+                                <option value="">Scegli una città...</option>
+                                {% for citta in citta_list %}
+                                    <option value="{{ citta }}">{{ citta }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Cerca Bar</button>
+                        </div>
+                    </form>
+                {% else %}
+                    <h3 class="h5 mb-3">Bar a {{ citta_selezionata }}</h3>
+                    <form method="post" action="{{ url_for('seleziona_bar') }}">
+                        <div class="row">
                             {% for bar in bar_list %}
-                                <option value="{{ bar.id }}">{{ bar.nome }} - {{ bar.indirizzo }}</option>
+                                <div class="col-md-6 mb-3">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h4 class="card-title h6">{{ bar.nome }}</h4>
+                                            <p class="card-text small">{{ bar.indirizzo }}</p>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="bar" id="bar{{ bar.id }}" value="{{ bar.id }}" required>
+                                                <label class="form-check-label" for="bar{{ bar.id }}">
+                                                    Seleziona
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             {% endfor %}
-                        </select>
-                    </div>
-                    <button type="submit">CONFERMA</button>
-                </form>
-            {% endif %}
-        </section>
-    </main>
-
-    <footer>
-        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
-    </footer>
-</body>
-</html>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">Conferma</button>
+                            <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-secondary">Cambia città</a>
+                        </div>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

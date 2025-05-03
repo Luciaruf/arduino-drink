@@ -1,46 +1,61 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAFESIP - Storico</title>
-</head>
-<body>
-    <header>
-        <nav>
-            <a href="{{ url_for('home') }}">←</a>
-            <a href="{{ url_for('simula') }}">Simula</a>
-            <a href="{{ url_for('logout') }}">Logout</a>
-        </nav>
-    </header>
+{% extends "base.html" %}
 
-    <main>
-        <section>
-            <p>Ti trovi nel bar/ristorante/pizzeria: <strong>{{ bar.nome }}</strong></p>
+{% block title %}SAFESIP - Gamification{% endblock %}
 
-            <section>
-                <h2>I tuoi drink</h2>
-                <ul>
-                    {% for drink in user_drinks %}
-                        <li>{{ drink.nome }} – {{ drink.conteggio }} volte</li>
-                    {% endfor %}
-                </ul>
-            </section>
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">Le tue statistiche</h2>
+                <h3 class="h5 mb-3">{{ bar.nome }}</h3>
 
-            <section>
-                <h2>Le tue statistiche</h2>
-                <h3>Classifica generale</h3>
-                <ul>
-                    {% for utente in classifica %}
-                        <li>{{ utente.nome }} – {{ utente.conteggio }} drink</li>
-                    {% endfor %}
-                </ul>
-            </section>
-        </section>
-    </main>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Drink</th>
+                                <th class="text-end">Consumazioni</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for drink in user_drinks %}
+                                <tr>
+                                    <td>{{ drink.nome }}</td>
+                                    <td class="text-end">{{ drink.conteggio }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-    <footer>
-        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
-    </footer>
-</body>
-</html> 
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">Classifica Generale</h2>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Posizione</th>
+                                <th>Utente</th>
+                                <th class="text-end">Consumazioni</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for pos, utente in classifica %}
+                                <tr>
+                                    <td>{{ loop.index }}</td>
+                                    <td>{{ utente.nome }}</td>
+                                    <td class="text-end">{{ utente.conteggio }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
