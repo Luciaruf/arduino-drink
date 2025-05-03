@@ -1,45 +1,80 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from datetime import datetime
+import requests
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'super-segreta')
 
-# Config DB PostgreSQL (Render.com imposta DATABASE_URL automaticamente)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///alcolemia.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# === Airtable API ===
+AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', 'patMvTkVAFXuBTZK0.73601aeaf05c4ffb8fc1109ffc1a7aa3d8e8bf740f094bb6f980c23aecbefeb5')
+BASE_ID = 'appQZSlkfRWqALhaG'
 
-db = SQLAlchemy(app)
+def get_airtable_headers():
+    return {
+        'Authorization': f'Bearer {AIRTABLE_API_KEY}',
+        'Content-Type': 'application/json'
+    }
 
-# === MODELLI ===
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(300), nullable=False)
+def get_bars():
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+    response = requests.get(url, headers=get_airtable_headers())
+    return response.json()['records']
 
-class Consumazione(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    drink_id = db.Column(db.Integer, db.ForeignKey('drink.id'), nullable=False)
-    data = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    user = db.relationship('User', backref=db.backref('consumazioni', lazy=True))
-    drink = db.relationship('Drink', backref=db.backref('consumazioni', lazy=True))
+def get_drinks(bar_id=None):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+    params = {}
+    if bar_id:
+        params['filterByFormula'] = f"{{Bar}}='{bar_id}'"
+    response = requests.get(url, headers=get_airtable_headers(), params=params)
+    return response.json()['records']
 
-class Bar(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(100), nullable=False)
-    indirizzo = db.Column(db.String(200), nullable=False)
-    tipo = db.Column(db.String(50), nullable=False)  # es. "Bar", "Pub", "Disco"
-    citta = db.Column(db.String(100), nullable=False)
+def get_user_by_email(email):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Users'
+    params = {
+        'filterByFormula': f"{{Email}}='{email}'"
+    }
+    response = requests.get(url, headers=get_airtable_headers(), params=params)
+    records = response.json().get('records', [])
+    return records[0] if records else None
 
-class Drink(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(100), nullable=False)
-    ingredienti = db.Column(db.Text, nullable=False)
-    bar_id = db.Column(db.Integer, db.ForeignKey('bar.id'), nullable=False)
-    bar = db.relationship('Bar', backref=db.backref('drinks', lazy=True))
+def create_user(email, password_hash):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Users'
+    data = {
+        'records': [{
+            'fields': {
+                'Email': email,
+                'Password': password_hash
+            }
+        }]
+    }
+    response = requests.post(url, headers=get_airtable_headers(), json=data)
+    return response.json()['records'][0]
+
+def create_consumazione(user_id, drink_id, bar_id):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
+    data = {
+        'records': [{
+            'fields': {
+                'User': [user_id],
+                'Drink': [drink_id],
+                'Bar': [bar_id]
+            }
+        }]
+    }
+    response = requests.post(url, headers=get_airtable_headers(), json=data)
+    return response.json()['records'][0]
+
+def get_user_consumazioni(user_id, bar_id=None):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
+    formula = f"AND({{User}}='{user_id}'"
+    if bar_id:
+        formula += f", {{Bar}}='{bar_id}'"
+    formula += ")"
+    params = {'filterByFormula': formula}
+    response = requests.get(url, headers=get_airtable_headers(), params=params)
+    return response.json().get('records', [])
 
 # === FUNZIONI ===
 def calcola_tasso_alcolemico(peso, genere, volume, gradazione, stomaco):
@@ -52,7 +87,7 @@ def calcola_tasso_alcolemico(peso, genere, volume, gradazione, stomaco):
 # === ROTTE ===
 @app.route('/')
 def home():
-    bars = Bar.query.all()
+    bars = get_bars()
     return render_template('home.html', bars=bars)
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -61,13 +96,11 @@ def register():
         email = request.form['email']
         password = request.form['password']
 
-        if User.query.filter_by(email=email).first():
+        if get_user_by_email(email):
             flash('Utente già registrato!')
             return redirect(url_for('register'))
 
-        user = User(email=email, password_hash=generate_password_hash(password))
-        db.session.add(user)
-        db.session.commit()
+        create_user(email, generate_password_hash(password))
         flash('Registrazione avvenuta!')
         return redirect(url_for('login'))
 
@@ -78,10 +111,11 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        user = User.query.filter_by(email=email).first()
+        user = get_user_by_email(email)
 
-        if user and check_password_hash(user.password_hash, password):
-            session['user'] = user.email
+        if user and check_password_hash(user['fields']['Password'], password):
+            session['user'] = user['id']
+            session['user_email'] = email
             return redirect(url_for('seleziona_bar'))
         else:
             flash('Credenziali errate')
@@ -106,11 +140,12 @@ def seleziona_bar():
             # Prima selezione: città
             citta = request.form.get('citta')
             if citta:
-                bar_list = Bar.query.filter_by(citta=citta).all()
+                bars = get_bars()
+                bar_list = [bar for bar in bars if bar['fields'].get('Città') == citta]
                 return render_template('seleziona_bar.html', 
                                     citta_selezionata=citta,
                                     bar_list=bar_list,
-                                    citta_list=db.session.query(Bar.citta.distinct()).all())
+                                    citta_list=list(set(bar['fields'].get('Città', '') for bar in bars)))
             else:
                 flash('Seleziona una città')
                 return redirect(url_for('seleziona_bar'))
@@ -120,17 +155,17 @@ def seleziona_bar():
             return redirect(url_for('simula'))
 
     # Get unique cities for dropdown
-    citta_list = db.session.query(Bar.citta.distinct()).all()
-    return render_template('seleziona_bar.html', 
-                         citta_list=[c[0] for c in citta_list])
+    bars = get_bars()
+    citta_list = list(set(bar['fields'].get('Città', '') for bar in bars))
+    return render_template('seleziona_bar.html', citta_list=citta_list)
 
 @app.route('/simula', methods=['GET', 'POST'])
 def simula():
     if 'user' not in session or 'bar_id' not in session:
         return redirect(url_for('login'))
 
-    bar = Bar.query.get(session['bar_id'])
-    drinks = bar.drinks
+    bar_id = session['bar_id']
+    drinks = get_drinks(bar_id)
     tasso = None
     drink_selezionato = None
 
@@ -140,19 +175,22 @@ def simula():
         peso = float(request.form['peso'])
         stomaco = request.form['stomaco']
 
-        drink_selezionato = Drink.query.get(drink_id)
-        volume = 200
-        gradazione = 12
+        # Trova il drink selezionato
+        drink_selezionato = next((d for d in drinks if d['id'] == drink_id), None)
+        if drink_selezionato:
+            volume = drink_selezionato['fields'].get('Volume (ml)', 200)
+            gradazione = drink_selezionato['fields'].get('Gradazione', 0.12)
 
-        tasso = calcola_tasso_alcolemico(peso, genere, volume, gradazione, stomaco)
+            tasso = calcola_tasso_alcolemico(peso, genere, volume, gradazione * 100, stomaco)
 
-        # Registra la consumazione
-        user = User.query.filter_by(email=session['user']).first()
-        consumazione = Consumazione(user_id=user.id, drink_id=drink_id)
-        db.session.add(consumazione)
-        db.session.commit()
+            # Registra la consumazione
+            create_consumazione(session['user'], drink_id, bar_id)
 
-    return render_template('simula.html', bar=bar, drinks=drinks, tasso=tasso, drink_selezionato=drink_selezionato)
+    return render_template('simula.html', 
+                         bar=next((b for b in get_bars() if b['id'] == bar_id), None),
+                         drinks=drinks,
+                         tasso=tasso,
+                         drink_selezionato=drink_selezionato)
 
 @app.route('/gamification')
 def gamification():
@@ -164,86 +202,48 @@ def gamification():
         flash('Seleziona prima un bar')
         return redirect(url_for('seleziona_bar'))
 
-    user = User.query.filter_by(email=session['user']).first()
-    bar = Bar.query.get(session['bar_id'])
+    user_id = session['user']
+    bar_id = session['bar_id']
+    drinks = get_drinks(bar_id)
 
     # Ottieni le consumazioni dell'utente per questo bar
-    user_drinks = db.session.query(
-        Drink.nome,
-        db.func.count(Consumazione.id).label('conteggio')
-    ).join(Consumazione).filter(
-        Consumazione.user_id == user.id,
-        Drink.bar_id == bar.id
-    ).group_by(Drink.nome).all()
+    consumazioni = get_user_consumazioni(user_id, bar_id)
+    
+    # Raggruppa le consumazioni per drink
+    drink_counts = {}
+    for cons in consumazioni:
+        drink_id = cons['fields']['Drink'][0]
+        drink_counts[drink_id] = drink_counts.get(drink_id, 0) + 1
 
-    # Ottieni la classifica generale per questo bar
-    classifica = db.session.query(
-        User.email.label('nome'),
-        db.func.count(Consumazione.id).label('conteggio')
-    ).join(Consumazione).join(Drink).filter(
-        Drink.bar_id == bar.id
-    ).group_by(User.email).order_by(db.desc('conteggio')).limit(10).all()
+    # Mappa i drink_id ai nomi dei drink
+    user_drinks = [
+        {
+            'nome': next((d['fields']['Name'] for d in drinks if d['id'] == drink_id), 'Drink Sconosciuto'),
+            'conteggio': count
+        }
+        for drink_id, count in drink_counts.items()
+    ]
+
+    # Ottieni tutte le consumazioni per questo bar
+    all_consumazioni = get_user_consumazioni(None, bar_id)
+    
+    # Raggruppa per utente
+    user_counts = {}
+    for cons in all_consumazioni:
+        user_id = cons['fields']['User'][0]
+        user_email = get_user_by_email(user_id)['fields']['Email']
+        user_counts[user_email] = user_counts.get(user_email, 0) + 1
+
+    # Crea la classifica
+    classifica = [
+        {'nome': email, 'conteggio': count}
+        for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+    ][:10]
 
     return render_template('gamification.html',
-                         bar=bar,
+                         bar=next((b for b in get_bars() if b['id'] == bar_id), None),
                          user_drinks=user_drinks,
                          classifica=classifica)
-
-# === SETUP DB ===
-with app.app_context():
-    db.create_all()
-    db.drop_all()
-    db.create_all()
-
-    # Crea utente admin
-    if not User.query.first():
-        admin = User(email='admin', password_hash=generate_password_hash('admin'))
-        db.session.add(admin)
-        db.session.commit()
-
-    # Crea bar di prova
-    if not Bar.query.first():
-        bars = [
-            Bar(nome='Bar Centrale', indirizzo='Via Roma 1, Torino', tipo='Bar', citta='Torino'),
-            Bar(nome='Bar del Porto', indirizzo='Lungomare 10, Genova', tipo='Bar', citta='Genova'),
-            Bar(nome='Pub Irlandese', indirizzo='Via Milano 5, Torino', tipo='Pub', citta='Torino'),
-            Bar(nome='Disco Club', indirizzo='Via Napoli 20, Genova', tipo='Disco', citta='Genova')
-        ]
-        db.session.add_all(bars)
-        db.session.commit()
-
-    # Crea drink di prova
-    if not Drink.query.first():
-        drinks = [
-            Drink(nome='Mojito', ingredienti='Rum, menta, lime, zucchero, soda', bar_id=bars[0].id),
-            Drink(nome='Spritz', ingredienti='Aperol, prosecco, soda', bar_id=bars[0].id),
-            Drink(nome='Negroni', ingredienti='Gin, Campari, Vermouth', bar_id=bars[0].id),
-            Drink(nome='Gin Tonic', ingredienti='Gin, acqua tonica, lime', bar_id=bars[1].id),
-            Drink(nome='Moscow Mule', ingredienti='Vodka, ginger beer, lime', bar_id=bars[1].id),
-            Drink(nome='Irish Coffee', ingredienti='Whiskey, caffè, panna', bar_id=bars[2].id),
-            Drink(nome='Long Island', ingredienti='Vodka, rum, gin, tequila, triple sec', bar_id=bars[3].id)
-        ]
-        db.session.add_all(drinks)
-        db.session.commit()
-
-    # Crea consumazioni di prova
-    if not Consumazione.query.first():
-        from datetime import datetime, timedelta
-        import random
-
-        # Genera consumazioni per gli ultimi 30 giorni
-        admin = User.query.filter_by(email='admin').first()
-        for _ in range(20):  # 20 consumazioni per l'admin
-            drink = random.choice(drinks)
-            data = datetime.utcnow() - timedelta(days=random.randint(0, 30))
-            consumazione = Consumazione(
-                user_id=admin.id,
-                drink_id=drink.id,
-                data=data
-            )
-            db.session.add(consumazione)
-        
-        db.session.commit()
 
 if __name__ == '__main__':
     app.run(debug=True)
