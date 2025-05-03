@@ -8,7 +8,7 @@
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="card-title text-center mb-4">Simulazione Tasso Alcolemico</h2>
-                <h3 class="h5 mb-3">{{ bar.nome }}</h3>
+                <h3 class="h5 mb-3">{{ bar.fields.Name }}</h3>
 
                 <form method="post" action="{{ url_for('simula') }}">
                     <div class="row">
@@ -17,7 +17,7 @@
                             <select class="form-select" id="drink" name="drink" required>
                                 <option value="">Scegli un drink...</option>
                                 {% for drink in drinks %}
-                                    <option value="{{ drink.id }}">{{ drink.nome }}</option>
+                                    <option value="{{ drink.id }}">{{ drink.fields.Name }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -50,13 +50,35 @@
                 </form>
 
                 {% if tasso is not none %}
-                    <div class="alert alert-info mt-4">
-                        <h4 class="alert-heading">Risultato Simulazione</h4>
-                        <p class="mb-0">
-                            Drink: {{ drink_selezionato.nome }}<br>
-                            Tasso alcolemico stimato: {{ tasso }} g/L
-                        </p>
-                    </div>
+                    {% if esito == 'Positivo' %}
+                        <div class="alert alert-success mt-4">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-emoji-smile fs-1 me-3"></i>
+                                <div>
+                                    <h4 class="alert-heading">Ottimo! Puoi guidare in sicurezza</h4>
+                                    <p class="mb-0">
+                                        Drink: {{ drink_selezionato.fields.Name }}<br>
+                                        Tasso alcolemico stimato: {{ tasso }} g/L<br>
+                                        <small class="text-muted">Il tuo tasso alcolemico è inferiore al limite legale di 0.5 g/L</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-danger mt-4">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-emoji-frown fs-1 me-3"></i>
+                                <div>
+                                    <h4 class="alert-heading">Attenzione! Non guidare</h4>
+                                    <p class="mb-0">
+                                        Drink: {{ drink_selezionato.fields.Name }}<br>
+                                        Tasso alcolemico stimato: {{ tasso }} g/L<br>
+                                        <small class="text-muted">Il tuo tasso alcolemico supera il limite legale di 0.5 g/L</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
                 {% endif %}
             </div>
         </div>

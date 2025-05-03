@@ -3,56 +3,37 @@
 {% block title %}SAFESIP - Seleziona Bar{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <h2 class="card-title text-center mb-4">Seleziona un Bar</h2>
-                
-                {% if not citta_selezionata %}
-                    <form method="post" action="{{ url_for('seleziona_bar') }}">
-                        <div class="mb-3">
-                            <label for="citta" class="form-label">Seleziona la città</label>
-                            <select class="form-select" id="citta" name="citta" required>
-                                <option value="">Scegli una città...</option>
-                                {% for citta in citta_list %}
-                                    <option value="{{ citta }}">{{ citta }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">Cerca Bar</button>
-                        </div>
-                    </form>
-                {% else %}
-                    <h3 class="h5 mb-3">Bar a {{ citta_selezionata }}</h3>
-                    <form method="post" action="{{ url_for('seleziona_bar') }}">
-                        <div class="row">
+    <div class="container">
+        <h2 class="text-center mb-4">Seleziona il Bar</h2>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <form method="POST" id="barForm">
+                    <div class="form-group mb-4">
+                        <label for="citta">Città:</label>
+                        <select class="form-control" id="citta" name="citta" onchange="this.form.submit()">
+                            <option value="">Seleziona una città</option>
+                            {% for citta in citta_list %}
+                                <option value="{{ citta }}" {% if citta == citta_selezionata %}selected{% endif %}>{{ citta }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+
+                {% if citta_selezionata %}
+                    <div class="form-group mb-4">
+                        <label for="bar">Bar disponibili a {{ citta_selezionata }}:</label>
+                        <div class="list-group">
                             {% for bar in bar_list %}
-                                <div class="col-md-6 mb-3">
-                                    <div class="card h-100">
-                                        <div class="card-body">
-                                            <h4 class="card-title h6">{{ bar.nome }}</h4>
-                                            <p class="card-text small">{{ bar.indirizzo }}</p>
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="bar" id="bar{{ bar.id }}" value="{{ bar.id }}" required>
-                                                <label class="form-check-label" for="bar{{ bar.id }}">
-                                                    Seleziona
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                                <a href="{{ url_for('seleziona_bar', bar=bar.id) }}" class="list-group-item list-group-item-action">
+                                    <h5 class="mb-1">{{ bar.fields.Name }}</h5>
+                                    <p class="mb-1">{{ bar.fields.Indirizzo }}</p>
+                                </a>
                             {% endfor %}
                         </div>
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary">Conferma</button>
-                            <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-secondary">Cambia città</a>
-                        </div>
-                    </form>
+                    </div>
                 {% endif %}
             </div>
         </div>
     </div>
-</div>
 {% endblock %}

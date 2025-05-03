@@ -24,11 +24,13 @@ def get_bars():
 
 def get_drinks(bar_id=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
-    params = {}
+    response = requests.get(url, headers=get_airtable_headers())
+    drinks = response.json()['records']
+    
     if bar_id:
-        params['filterByFormula'] = f"{{Bar}}='{bar_id}'"
-    response = requests.get(url, headers=get_airtable_headers(), params=params)
-    return response.json()['records']
+        filtered_drinks = [d for d in drinks if bar_id in d['fields'].get('Bar', [])]
+        return filtered_drinks
+    return drinks
 
 def get_user_by_email(email):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Users'
@@ -52,29 +54,60 @@ def create_user(email, password_hash):
     response = requests.post(url, headers=get_airtable_headers(), json=data)
     return response.json()['records'][0]
 
-def create_consumazione(user_id, drink_id, bar_id):
+def create_consumazione(user_id, drink_id, bar_id, tasso):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
     data = {
         'records': [{
             'fields': {
                 'User': [user_id],
                 'Drink': [drink_id],
-                'Bar': [bar_id]
+                'Bar': [bar_id],
+                'Tasso': tasso,
+                'Esito': 'Positivo' if tasso < 0.5 else 'Negativo'
             }
         }]
     }
     response = requests.post(url, headers=get_airtable_headers(), json=data)
-    return response.json()['records'][0]
+    response_data = response.json()
+    
+    if response.status_code != 200:
+        print(f"Errore Airtable: {response.status_code}")
+        print(f"Risposta: {response_data}")
+        return None
+        
+    if 'records' not in response_data:
+        print(f"Risposta Airtable non valida: {response_data}")
+        return None
+        
+    return response_data['records'][0]
 
-def get_user_consumazioni(user_id, bar_id=None):
+def get_user_consumazioni(user_id=None, bar_id=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
-    formula = f"AND({{User}}='{user_id}'"
-    if bar_id:
-        formula += f", {{Bar}}='{bar_id}'"
-    formula += ")"
-    params = {'filterByFormula': formula}
+    if user_id and bar_id:
+        formula = f"AND(ARRAYJOIN({{User}}, ',') = '{user_id}', {{Bar}}='{bar_id}')"
+    elif user_id:
+        formula = f"ARRAYJOIN({{User}}, ',') = '{user_id}'"
+    elif bar_id:
+        formula = f"{{Bar}}='{bar_id}'"
+    else:
+        formula = ""
+    params = {}
+    if formula:
+        params['filterByFormula'] = formula
     response = requests.get(url, headers=get_airtable_headers(), params=params)
     return response.json().get('records', [])
+
+def get_bar_by_id(bar_id):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Bar/{bar_id}'
+    response = requests.get(url, headers=get_airtable_headers())
+    return response.json()
+
+def get_user_by_id(user_id):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Users/{user_id}'
+    response = requests.get(url, headers=get_airtable_headers())
+    if response.status_code == 200:
+        return response.json()
+    return None
 
 # === FUNZIONI ===
 def calcola_tasso_alcolemico(peso, genere, volume, gradazione, stomaco):
@@ -83,6 +116,13 @@ def calcola_tasso_alcolemico(peso, genere, volume, gradazione, stomaco):
     assorbimento = 0.9 if stomaco == 'vuoto' else 0.7
     bac = (grammi_alcol * assorbimento) / (peso * r)
     return round(bac, 3)
+
+# === CONTEXT PROCESSORS ===
+@app.context_processor
+def utility_processor():
+    return {
+        'get_bar_by_id': get_bar_by_id
+    }
 
 # === ROTTE ===
 @app.route('/')
@@ -116,7 +156,7 @@ def login():
         if user and check_password_hash(user['fields']['Password'], password):
             session['user'] = user['id']
             session['user_email'] = email
-            return redirect(url_for('seleziona_bar'))
+            return redirect(url_for('dashboard'))
         else:
             flash('Credenziali errate')
             return redirect(url_for('login'))
@@ -135,29 +175,31 @@ def seleziona_bar():
         flash('Devi essere loggato')
         return redirect(url_for('login'))
 
+    # Get all bars for the city dropdown
+    bars = get_bars()
+    citta_list = list(set(bar['fields'].get('Città', '') for bar in bars if bar['fields']))
+
+    # Check if bar is selected from URL
+    bar_id = request.args.get('bar')
+    if bar_id:
+        session['bar_id'] = bar_id
+        return redirect(url_for('simula'))
+
     if request.method == 'POST':
         if 'citta' in request.form:
             # Prima selezione: città
             citta = request.form.get('citta')
             if citta:
-                bars = get_bars()
                 bar_list = [bar for bar in bars if bar['fields'].get('Città') == citta]
                 return render_template('seleziona_bar.html', 
                                     citta_selezionata=citta,
                                     bar_list=bar_list,
-                                    citta_list=list(set(bar['fields'].get('Città', '') for bar in bars)))
-            else:
-                flash('Seleziona una città')
-                return redirect(url_for('seleziona_bar'))
-        elif 'bar' in request.form:
-            # Seconda selezione: bar
-            session['bar_id'] = request.form['bar']
-            return redirect(url_for('simula'))
+                                    citta_list=citta_list)
 
-    # Get unique cities for dropdown
-    bars = get_bars()
-    citta_list = list(set(bar['fields'].get('Città', '') for bar in bars))
-    return render_template('seleziona_bar.html', citta_list=citta_list)
+    return render_template('seleziona_bar.html', 
+                         citta_list=citta_list,
+                         bar_list=[],
+                         citta_selezionata=None)
 
 @app.route('/simula', methods=['GET', 'POST'])
 def simula():
@@ -168,6 +210,7 @@ def simula():
     drinks = get_drinks(bar_id)
     tasso = None
     drink_selezionato = None
+    esito = None
 
     if request.method == 'POST':
         drink_id = request.form['drink']
@@ -182,40 +225,89 @@ def simula():
             gradazione = drink_selezionato['fields'].get('Gradazione', 0.12)
 
             tasso = calcola_tasso_alcolemico(peso, genere, volume, gradazione * 100, stomaco)
+            esito = 'Positivo' if tasso < 0.5 else 'Negativo'
 
-            # Registra la consumazione
-            create_consumazione(session['user'], drink_id, bar_id)
+            # Registra la consumazione con l'esito
+            try:
+                create_consumazione(session['user'], drink_id, bar_id, tasso)
+            except Exception as e:
+                print(f"Errore durante la creazione della consumazione: {str(e)}")
+                flash('Errore durante il salvataggio della simulazione. Il risultato è stato calcolato ma non salvato.')
 
+    bar = next((b for b in get_bars() if b['id'] == bar_id), None)
     return render_template('simula.html', 
-                         bar=next((b for b in get_bars() if b['id'] == bar_id), None),
+                         bar=bar,
                          drinks=drinks,
                          tasso=tasso,
-                         drink_selezionato=drink_selezionato)
+                         drink_selezionato=drink_selezionato,
+                         esito=esito)
 
-@app.route('/gamification')
-def gamification():
+@app.route('/dashboard')
+def dashboard():
     if 'user' not in session:
         flash('Devi essere loggato')
         return redirect(url_for('login'))
 
-    if 'bar_id' not in session:
-        flash('Seleziona prima un bar')
-        return redirect(url_for('seleziona_bar'))
-
     user_id = session['user']
-    bar_id = session['bar_id']
-    drinks = get_drinks(bar_id)
+    bar_id = session.get('bar_id')
 
-    # Ottieni le consumazioni dell'utente per questo bar
+    if not bar_id:
+        # Statistiche globali
+        consumazioni = get_user_consumazioni(user_id)
+        all_consumazioni = get_user_consumazioni(None)
+        drinks = get_drinks()
+        bars = get_bars()
+        print("DEBUG - consumazioni trovate:", consumazioni)
+        print("DEBUG - all_consumazioni:", all_consumazioni)
+        print("DEBUG - drinks:", drinks)
+        print("DEBUG - bars:", bars)
+
+        # Raggruppa per bar e drink
+        user_drinks = {}
+        for cons in consumazioni:
+            if 'Bar' not in cons['fields'] or not cons['fields']['Bar']:
+                continue
+            if 'Drink' not in cons['fields'] or not cons['fields']['Drink']:
+                continue
+            bar = next((b for b in bars if b['id'] == cons['fields']['Bar'][0]), None)
+            drink = next((d for d in drinks if d['id'] == cons['fields']['Drink'][0]), None)
+            bar_name = bar['fields']['Name'] if bar else 'Bar Sconosciuto'
+            drink_name = drink['fields']['Name'] if drink else 'Drink Sconosciuto'
+            key = f"{bar_name} - {drink_name}"
+            user_drinks[key] = user_drinks.get(key, 0) + 1
+        user_drinks = [
+            {'nome': k, 'conteggio': v}
+            for k, v in user_drinks.items()
+        ]
+
+        # Classifica generale su tutti i bar
+        user_counts = {}
+        for cons in all_consumazioni:
+            if 'User' not in cons['fields'] or not cons['fields']['User']:
+                continue
+            uid = cons['fields']['User'][0]
+            user = get_user_by_id(uid)
+            user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else 'Utente Sconosciuto'
+            user_counts[user_email] = user_counts.get(user_email, 0) + 1
+        classifica = [
+            {'nome': email, 'conteggio': count}
+            for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+        ][:10]
+
+        return render_template('dashboard.html',
+                             bar=None,
+                             user_drinks=user_drinks,
+                             classifica=classifica)
+
+    # Statistiche per bar selezionato (come ora)
+    drinks = get_drinks(bar_id)
     consumazioni = get_user_consumazioni(user_id, bar_id)
-    
-    # Raggruppa le consumazioni per drink
     drink_counts = {}
     for cons in consumazioni:
+        if 'Drink' not in cons['fields'] or not cons['fields']['Drink']:
+            continue
         drink_id = cons['fields']['Drink'][0]
         drink_counts[drink_id] = drink_counts.get(drink_id, 0) + 1
-
-    # Mappa i drink_id ai nomi dei drink
     user_drinks = [
         {
             'nome': next((d['fields']['Name'] for d in drinks if d['id'] == drink_id), 'Drink Sconosciuto'),
@@ -223,25 +315,21 @@ def gamification():
         }
         for drink_id, count in drink_counts.items()
     ]
-
-    # Ottieni tutte le consumazioni per questo bar
     all_consumazioni = get_user_consumazioni(None, bar_id)
-    
-    # Raggruppa per utente
     user_counts = {}
     for cons in all_consumazioni:
-        user_id = cons['fields']['User'][0]
-        user_email = get_user_by_email(user_id)['fields']['Email']
+        if 'User' not in cons['fields'] or not cons['fields']['User']:
+            continue
+        uid = cons['fields']['User'][0]
+        user = get_user_by_id(uid)
+        user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else 'Utente Sconosciuto'
         user_counts[user_email] = user_counts.get(user_email, 0) + 1
-
-    # Crea la classifica
     classifica = [
         {'nome': email, 'conteggio': count}
         for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
     ][:10]
-
-    return render_template('gamification.html',
-                         bar=next((b for b in get_bars() if b['id'] == bar_id), None),
+    return render_template('dashboard.html',
+                         bar=get_bar_by_id(bar_id),
                          user_drinks=user_drinks,
                          classifica=classifica)
 

@@ -1,47 +1,267 @@
 {% extends "base.html" %}
 
-{% block title %}SAFESIP - Home{% endblock %}
+{% block title %}SAFESIP - Il primo sottobicchiere smart{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --primary-pastel: #A8D8EA;
+        --secondary-pastel: #AA96DA;
+        --accent-pastel: #FCBAD3;
+        --light-pastel: #FFFFD2;
+        --text-color: #2C3E50;
+    }
+
+    body {
+        font-family: 'Montserrat', sans-serif;
+    }
+
+    .hero-section {
+        background: linear-gradient(135deg, var(--primary-pastel) 0%, var(--secondary-pastel) 100%);
+        padding: 100px 0;
+        margin-bottom: 60px;
+        color: var(--text-color);
+    }
+
+    .hero-title {
+        font-size: 3.5rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        line-height: 1.2;
+        font-family: 'Montserrat', sans-serif;
+    }
+
+    .hero-subtitle {
+        font-size: 1.5rem;
+        margin-bottom: 2rem;
+        opacity: 0.9;
+        font-weight: 400;
+    }
+
+    .feature-card {
+        background: white;
+        border-radius: 20px;
+        padding: 30px;
+        margin-bottom: 30px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        transition: transform 0.3s ease;
+        border: none;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .feature-card h3 {
+        font-weight: 600;
+        margin: 1rem 0;
+    }
+
+    .feature-card p {
+        font-weight: 400;
+        color: #666;
+    }
+
+    .feature-icon {
+        font-size: 2.5rem;
+        margin-bottom: 20px;
+        color: var(--secondary-pastel);
+    }
+
+    .cta-section {
+        background: var(--light-pastel);
+        padding: 80px 0;
+        margin: 60px 0;
+        border-radius: 30px;
+    }
+
+    .bar-card {
+        background: white;
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        transition: transform 0.3s ease;
+        border: none;
+        margin-bottom: 30px;
+    }
+
+    .bar-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .bar-card .card-body {
+        padding: 25px;
+    }
+
+    .bar-card .card-title {
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+
+    .bar-card .card-text {
+        font-weight: 400;
+        color: #666;
+    }
+
+    .btn-primary {
+        background: var(--secondary-pastel);
+        border: none;
+        padding: 12px 30px;
+        border-radius: 30px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        font-family: 'Montserrat', sans-serif;
+    }
+
+    .btn-primary:hover {
+        background: var(--primary-pastel);
+        transform: translateY(-2px);
+    }
+
+    .section-title {
+        color: var(--text-color);
+        font-weight: 700;
+        margin-bottom: 40px;
+        position: relative;
+        padding-bottom: 15px;
+        font-family: 'Montserrat', sans-serif;
+    }
+
+    .section-title::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 60px;
+        height: 3px;
+        background: var(--accent-pastel);
+    }
+
+    .lead {
+        font-weight: 400;
+        font-size: 1.2rem;
+    }
+
+    @media (max-width: 991.98px) {
+        .hero-section {
+            padding: 40px 0 30px 0;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: 2.1rem;
+        }
+        .hero-subtitle {
+            font-size: 1.1rem;
+        }
+        .hero-img-mobile {
+            margin-top: 30px;
+            max-width: 80vw;
+        }
+        .d-flex.gap-3 {
+            flex-direction: column !important;
+            gap: 1rem !important;
+            align-items: center;
+        }
+    }
+    @media (max-width: 767.98px) {
+        .feature-card, .bar-card {
+            padding: 18px !important;
+        }
+        .section-title {
+            font-size: 1.3rem;
+        }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-    <section class="text-center mb-5">
-        <h1 class="display-4 mb-4">Il primo sottobicchiere smart</h1>
-        <p class="lead">Un dispositivo per offrire ai consumatori un'esperienza innovativa e sicura.</p>
-    </section>
-
-    <div class="row">
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <h3 class="card-title">HAI UN'ATTIVITÀ COMMERCIALE?</h3>
-                    <p class="card-text">Scopri come diventare partner SAFESIP e offrire un servizio innovativo ai tuoi clienti.</p>
-                    <a href="https://safesip.it/partner" class="btn btn-primary" target="_blank">Diventa partner</a>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <h3 class="card-title">SEI UN CONSUMATORE?</h3>
-                    <p class="card-text">Registrati per accedere a tutti i servizi SAFESIP e vivere un'esperienza di consumo responsabile.</p>
-                    <a href="{{ url_for('register') }}" class="btn btn-primary">Registrati</a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <section class="mt-5">
-        <h2 class="text-center mb-4">BAR CONVENZIONATI</h2>
-        <div class="row">
-            {% for bar in bars %}
-                <div class="col-md-4 mb-4">
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <h5 class="card-title">{{ bar.nome }}</h5>
-                            <p class="card-text">{{ bar.indirizzo }}</p>
-                        </div>
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-6">
+                    <h1 class="hero-title">Bevi Responsabilmente con SAFESIP</h1>
+                    <p class="hero-subtitle">Il primo sottobicchiere smart che ti aiuta a monitorare il tuo consumo di alcol in tempo reale.</p>
+                    <div class="d-flex gap-3">
+                        <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">Inizia Ora</a>
+                        <a href="#how-it-works" class="btn btn-outline-light btn-lg">Scopri di più</a>
                     </div>
                 </div>
+                <div class="col-lg-6 text-center mt-4 mt-lg-0">
+                    <img src="{{ url_for('static', filename='safesip-hero.png') }}" alt="Illustrazione di una donna che beve con SAFESIP, il primo sottobicchiere smart in Italia" class="img-fluid rounded-4 shadow-lg hero-img-mobile" style="max-width: 100%; height: auto;">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="container mb-5" id="how-it-works">
+        <h2 class="section-title text-center">Come Funziona</h2>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="feature-card text-center">
+                    <i class="bi bi-cup-hot feature-icon"></i>
+                    <h3>Posiziona</h3>
+                    <p>Appoggia il tuo drink sul sottobicchiere SAFESIP e inizia a bere in sicurezza.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card text-center">
+                    <i class="bi bi-phone feature-icon"></i>
+                    <h3>Monitora</h3>
+                    <p>Controlla in tempo reale il tuo tasso alcolemico stimato direttamente dall'app.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card text-center">
+                    <i class="bi bi-shield-check feature-icon"></i>
+                    <h3>Guidi Sicuro</h3>
+                    <p>Ricevi avvisi quando è il momento di fermarti o chiamare un taxi.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-md-8 text-center">
+                    <h2 class="section-title">Unisciti alla Rivoluzione SAFESIP</h2>
+                    <p class="lead mb-4">Scegli se diventare partner o utilizzare il servizio come consumatore.</p>
+                    <div class="d-flex justify-content-center gap-4">
+                        <a href="https://safesip.it/partner" class="btn btn-primary btn-lg" target="_blank">
+                            <i class="bi bi-building"></i> Diventa Partner
+                        </a>
+                        <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">
+                            <i class="bi bi-person-plus"></i> Registrati
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Bars Section -->
+    <section class="container mb-5">
+        <h2 class="section-title text-center">Bar Convenzionati</h2>
+        <div class="row">
+            {% for bar in bars %}
+                {% if bar.fields %}
+                    <div class="col-md-4">
+                        <div class="bar-card">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ bar.fields.Name }}</h5>
+                                <p class="card-text">
+                                    <i class="bi bi-geo-alt"></i> {{ bar.fields.Indirizzo }}<br>
+                                    <i class="bi bi-building"></i> {{ bar.fields.Città }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
             {% endfor %}
         </div>
     </section>
