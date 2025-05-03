@@ -2,18 +2,51 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Seleziona Bar</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAFESIP - Seleziona Bar</title>
 </head>
 <body>
-    <h1>In quale bar ti trovi?</h1>
-    <form method="POST">
-        <select name="bar" required>
-            {% for bar in bar_list %}
-                <option value="{{ bar.id }}">{{ bar.nome }} - {{ bar.indirizzo }}</option>
-            {% endfor %}
-        </select>
-        <br><br>
-        <button type="submit">Conferma</button>
-    </form>
+    <header>
+        <nav>
+            <a href="{{ url_for('home') }}">←</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </nav>
+    </header>
+
+    <main>
+        <section>
+            {% if not citta_selezionata %}
+                <h1>IN CHE CITTÀ TI TROVI?</h1>
+                <form method="post" action="{{ url_for('seleziona_bar') }}">
+                    <div>
+                        <select name="citta" required>
+                            <option value="">Seleziona città</option>
+                            {% for citta in citta_list %}
+                                <option value="{{ citta }}">{{ citta }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit">CONFERMA</button>
+                </form>
+            {% else %}
+                <h1>DOVE TI TROVI?</h1>
+                <form method="post" action="{{ url_for('seleziona_bar') }}">
+                    <div>
+                        <select name="bar" required>
+                            <option value="">Seleziona bar</option>
+                            {% for bar in bar_list %}
+                                <option value="{{ bar.id }}">{{ bar.nome }} - {{ bar.indirizzo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit">CONFERMA</button>
+                </form>
+            {% endif %}
+        </section>
+    </main>
+
+    <footer>
+        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
+    </footer>
 </body>
 </html>

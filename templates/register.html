@@ -1,6 +1,37 @@
-<h1>Registrazione</h1>
-<form method="post">
-    Email: <input type="email" name="email" required><br>
-    Password: <input type="password" name="password" required><br>
-    <button type="submit">Registrati</button>
-</form>
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAFESIP - Registrazione</title>
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="{{ url_for('home') }}">←</a>
+            <a href="{{ url_for('home') }}#concept">Cambia ruolo</a>
+        </nav>
+    </header>
+
+    <main>
+        <section>
+            <h1>NUOVO UTENTE</h1>
+            <form method="post" action="{{ url_for('register') }}">
+                <div>
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div>
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit">REGISTRATI</button>
+            </form>
+        </section>
+    </main>
+
+    <footer>
+        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
+    </footer>
+</body>
+</html>

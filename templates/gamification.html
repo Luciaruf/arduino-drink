@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAFESIP - Storico</title>
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="{{ url_for('home') }}">←</a>
+            <a href="{{ url_for('simula') }}">Simula</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </nav>
+    </header>
+
+    <main>
+        <section>
+            <p>Ti trovi nel bar/ristorante/pizzeria: <strong>{{ bar.nome }}</strong></p>
+
+            <section>
+                <h2>I tuoi drink</h2>
+                <ul>
+                    {% for drink in user_drinks %}
+                        <li>{{ drink.nome }} – {{ drink.conteggio }} volte</li>
+                    {% endfor %}
+                </ul>
+            </section>
+
+            <section>
+                <h2>Le tue statistiche</h2>
+                <h3>Classifica generale</h3>
+                <ul>
+                    {% for utente in classifica %}
+                        <li>{{ utente.nome }} – {{ utente.conteggio }} drink</li>
+                    {% endfor %}
+                </ul>
+            </section>
+        </section>
+    </main>
+
+    <footer>
+        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
+    </footer>
+</body>
+</html> 

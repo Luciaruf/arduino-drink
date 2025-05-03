@@ -1,2 +1,51 @@
-<h1>Benvenuto!</h1>
-<p><a href="{{ url_for('login') }}">Login</a> | <a href="{{ url_for('register') }}">Registrati</a></p>
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAFESIP - Home</title>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>SAFESIP</h1>
+            <nav>
+                <a href="{{ url_for('register') }}">Registrati</a>
+                <a href="{{ url_for('login') }}">Login</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section id="concept">
+            <h2>Il primo sottobicchiere smart</h2>
+            <p>Un dispositivo per offrire ai consumatori un'esperienza innovativa e sicura.</p>
+            
+            <section>
+                <h3>HAI UN'ATTIVITÀ COMMERCIALE?</h3>
+                <p>Scopri come diventare partner SAFESIP e offrire un servizio innovativo ai tuoi clienti.</p>
+                <a href="https://safesip.it/partner" target="_blank">Diventa partner</a>
+            </section>
+
+            <section>
+                <h3>SEI UN CONSUMATORE?</h3>
+                <p>Registrati per accedere a tutti i servizi SAFESIP e vivere un'esperienza di consumo responsabile.</p>
+                <a href="{{ url_for('register') }}">Registrati</a>
+            </section>
+        </section>
+
+        <section>
+            <h2>BAR CONVENZIONATI</h2>
+            <ul>
+                {% for bar in bars %}
+                    <li>{{ bar.nome }} - {{ bar.indirizzo }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>SAFESIP Disclaimer legale: Non sostituisce un etilometro. Non guidare se hai bevuto.</p>
+    </footer>
+</body>
+</html>
