@@ -1,11 +1,16 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from datetime import datetime
 import requests
+import time
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'super-segreta')
+
+# Global variables for Arduino data
+dato_da_arduino = None
+timestamp_dato = None
 
 # === Airtable API ===
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', 'patMvTkVAFXuBTZK0.73601aeaf05c4ffb8fc1109ffc1a7aa3d8e8bf740f094bb6f980c23aecbefeb5')
@@ -332,6 +337,40 @@ def dashboard():
                          bar=get_bar_by_id(bar_id),
                          user_drinks=user_drinks,
                          classifica=classifica)
+
+@app.route('/invia_dato', methods=['POST'])
+def invia_dato():
+    global dato_da_arduino, timestamp_dato
+    
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    
+    data = request.get_json()
+    
+    if 'peso' not in data:
+        return jsonify({"error": "Missing 'peso' field"}), 400
+    
+    try:
+        peso = float(data['peso'])
+        dato_da_arduino = peso
+        timestamp_dato = time.time()
+        return jsonify({"status": "ok", "ricevuto": peso})
+    except ValueError:
+        return jsonify({"error": "Invalid 'peso' value"}), 400
+
+@app.route('/test-arduino')
+def test_arduino():
+    global dato_da_arduino, timestamp_dato
+    
+    if dato_da_arduino is None:
+        return render_template('test_arduino.html', 
+                             dato=None, 
+                             tempo_trascorso=None)
+    
+    tempo_trascorso = time.time() - timestamp_dato
+    return render_template('test_arduino.html', 
+                         dato=dato_da_arduino, 
+                         tempo_trascorso=round(tempo_trascorso, 2))
 
 if __name__ == '__main__':
     app.run(debug=True)
