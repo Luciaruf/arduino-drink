@@ -61,13 +61,30 @@ def create_user(email, password_hash, peso_kg, genere):
             'fields': {\
                 'Email': email,\
                 'Password': password_hash,\
-                'Peso in kg': peso_kg,
-                'Genere': genere
+                'Peso': peso_kg,
+                'Genere': genere.capitalize()
             }\
         }]\
     }
     response = requests.post(url, headers=get_airtable_headers(), json=data)
-    return response.json()['records'][0]
+    response_json = response.json()
+    print(f"AIRTABLE CREATE USER STATUS CODE: {response.status_code}")
+    print(f"AIRTABLE CREATE USER RESPONSE: {response_json}")
+    
+    if response.status_code != 200 or 'records' not in response_json:
+        # Gestione più robusta dell'errore
+        error_message = response_json.get('error', {}).get('message', 'Errore sconosciuto da Airtable')
+        detailed_error = response_json.get('error', {}).get('type', '')
+        print(f"Errore durante la creazione dell'utente in Airtable: {error_message} (Tipo: {detailed_error})")
+        # Potresti voler sollevare un'eccezione personalizzata o restituire None/un messaggio d'errore specifico
+        # Per ora, per coerenza con il traceback, se manca 'records' continuerà a dare KeyError,
+        # ma avremo il log dell'errore.
+        # Se vogliamo evitare il KeyError e propagare un errore gestito:
+        # flash(f'Errore Airtable: {error_message}') # Se appropriato per il flusso utente
+        # return None # O sollevare un'eccezione
+        pass # Lascia che il KeyError avvenga dopo il log, per ora, per mantenere il comportamento del traceback originale
+
+    return response_json['records'][0]
 
 def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pieno_bool, timestamp_consumazione=None):
     if timestamp_consumazione is None:
@@ -80,7 +97,7 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
         return None
     
     user_fields = user_data['fields']
-    peso_utente_kg = user_fields.get('Peso in kg')
+    peso_utente_kg = user_fields.get('Peso')
     genere_utente = user_fields.get('Genere')
 
     if peso_utente_kg is None or genere_utente is None:
@@ -95,23 +112,37 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
         return None
 
     drink_fields = drink_data['fields']
-    gradazione_drink = drink_fields.get('gradazione') # Assumendo es. 0.05 per 5%
-    is_alcolico = drink_fields.get('Alcolico', False) # Default a non alcolico se non specificato
+    print(f"DEBUG SIMULA: Dati del drink recuperati da Airtable: {drink_fields}") # DEBUG PRINT
+    
+    gradazione_drink = drink_fields.get('Gradazione')
+    valore_alcolico_da_airtable = drink_fields.get('Alcolico (bool)')
+    is_alcolico = True if valore_alcolico_da_airtable == '1' else False
+    
+    print(f"DEBUG SIMULA: gradazione_drink={gradazione_drink}, tipo={type(gradazione_drink)}") # DEBUG PRINT
+    print(f"DEBUG SIMULA: valore_alcolico_da_airtable={valore_alcolico_da_airtable}, tipo={type(valore_alcolico_da_airtable)}") # DEBUG PRINT
+    print(f"DEBUG SIMULA: is_alcolico={is_alcolico}, tipo={type(is_alcolico)}") # DEBUG PRINT
 
     tasso_calcolato = 0.0
-    esito_calcolo = 'Positivo' # Default per non alcolici o errori
+    esito_calcolo = 'Negativo'
+
+    # Definisci stomaco_str qui, in base all'input booleano
+    stomaco_str = 'Pieno' if stomaco_pieno_bool else 'Vuoto'
 
     if is_alcolico and gradazione_drink is not None and gradazione_drink > 0:
         # 3. Prepara parametri per l'algoritmo
-        volume_ml = float(peso_cocktail_g) # Assumendo 1g = 1ml
-        gradazione_percent = float(gradazione_drink) # L'algoritmo si aspetta es. 0.12
+        volume_ml = float(peso_cocktail_g)
+        gradazione_percent = float(gradazione_drink)
         
-        genere_str = str(genere_utente).lower() # L'algoritmo si aspetta 'uomo' o 'donna'
+        genere_str = str(genere_utente).lower()
         if genere_str not in ['uomo', 'donna']:
             print(f"Errore: Genere non valido '{genere_str}' per l'utente {user_id}.")
-            return None # O gestisci un default
+            return None 
 
-        stomaco_str = 'pieno' if stomaco_pieno_bool else 'vuoto'
+        # stomaco_str è già definito sopra, qui era specifico per l'algoritmo che voleva minuscolo
+        # ma ora l'algoritmo riceve già 'pieno' o 'vuoto' e Airtable vuole 'Pieno' o 'Vuoto'
+        # quindi la definizione sopra va bene per entrambi se l'algoritmo gestisce maiuscole/minuscole indifferentemente
+        # Oppure, per l'algoritmo, usiamo .lower()
+        stomaco_per_algoritmo = stomaco_str.lower() # Assicuriamoci sia minuscolo per l'algoritmo
         
         ora_inizio_dt = timestamp_consumazione
         ora_fine_dt = ora_inizio_dt + timedelta(hours=2) # Modificato da 15 minuti a 2 ore
@@ -124,17 +155,18 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
             genere=genere_str,
             volume=volume_ml,
             gradazione=gradazione_percent,
-            stomaco=stomaco_str,
+            stomaco=stomaco_per_algoritmo, # Passa la versione minuscola all'algoritmo
             ora_inizio=ora_inizio_str,
             ora_fine=ora_fine_str # Ora include i 15 minuti di consumo
         )
         
         interpretazione = interpreta_tasso_alcolemico(tasso_calcolato)
-        esito_calcolo = 'Positivo' if interpretazione['legale'] else 'Negativo'
+        # Esito: "Negativo" se legale (<=0.5), "Positivo" se non legale (>0.5)
+        esito_calcolo = 'Negativo' if interpretazione['legale'] else 'Positivo'
     else:
         # Drink non alcolico o gradazione zero
         tasso_calcolato = 0.0
-        esito_calcolo = 'Positivo' # Non c'è alcol
+        esito_calcolo = 'Negativo' # Considerato "negativo" all'alcol se non c'è alcol o è analcolico
 
     # 4. Salva in Airtable
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
@@ -144,11 +176,10 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
                 'User': [user_id],
                 'Drink': [drink_id],
                 'Bar': [bar_id],
-                'timestamp': timestamp_consumazione.isoformat(),
-                'Peso (in g) del cocktail ricevuto da arduino': float(peso_cocktail_g),
-                "tasso calcolato g/L dall'algoritmo": round(tasso_calcolato, 3),
-                'Stomaco (bool se pieno o vuoto)': stomaco_pieno_bool,
-                'Risultato (positivo o negativo)': esito_calcolo
+                'Peso (g)': float(peso_cocktail_g),
+                'Tasso Calcolato (g/L)': round(tasso_calcolato, 3),
+                'Stomaco': stomaco_str,
+                'Risultato': esito_calcolo
             }
         }]
     }
@@ -296,9 +327,10 @@ def simula():
     bar_id = session['bar_id']
     drinks = get_drinks(bar_id)
     
-    consumazione_creata = None # Per conservare i dati della consumazione e passarli al template
+    consumazione_creata = None
     tasso_visualizzato = None
     esito_visualizzato = None
+    livello_messaggio = None
     drink_selezionato_obj = None
 
     # === GESTIONE DATO DA ARDUINO (TEMPORANEAMENTE FISSO PER TEST) ===
@@ -335,8 +367,20 @@ def simula():
             )
 
             if consumazione_creata and 'fields' in consumazione_creata:
-                tasso_visualizzato = consumazione_creata['fields'].get("tasso calcolato g/L dall'algoritmo")
-                esito_visualizzato = consumazione_creata['fields'].get("Risultato (positivo o negativo)")
+                tasso_visualizzato = consumazione_creata['fields'].get("Tasso Calcolato (g/L)")
+                esito_visualizzato = consumazione_creata['fields'].get("Risultato")
+                
+                # Ottieni anche il messaggio di livello per la visualizzazione
+                if tasso_visualizzato is not None:
+                    try:
+                        # Assicurati che tasso_visualizzato sia un float per la funzione dell'algoritmo
+                        tasso_float = float(tasso_visualizzato)
+                        interpretazione_dettagliata = interpreta_tasso_alcolemico(tasso_float)
+                        if interpretazione_dettagliata and 'livello' in interpretazione_dettagliata:
+                            livello_messaggio = interpretazione_dettagliata['livello']
+                    except ValueError:
+                        livello_messaggio = "N/A (tasso non numerico)"
+                        
                 flash('Simulazione registrata con successo!', 'success')
                 
                 # Resetta dato_da_arduino dopo l'uso
@@ -359,15 +403,20 @@ def simula():
                          tasso=tasso_visualizzato,
                          drink_selezionato=drink_selezionato_obj,
                          esito=esito_visualizzato,
-                         # peso_da_arduino=current_peso_cocktail_g, # Vecchia variabile, ora usiamo quella sotto
-                         valore_peso_utilizzato=current_peso_cocktail_g, # Passa il valore effettivamente usato
-                         usando_peso_fisso_test=usando_peso_fisso_test) # Passa il flag
+                         livello=livello_messaggio,
+                         valore_peso_utilizzato=current_peso_cocktail_g,
+                         usando_peso_fisso_test=usando_peso_fisso_test)
 
 @app.route('/dashboard')
 def dashboard():
     if 'user' not in session:
         flash('Devi essere loggato')
         return redirect(url_for('login'))
+
+    # Controllo per forzare la vista globale
+    view_mode = request.args.get('view_mode')
+    if view_mode == 'global':
+        session.pop('bar_id', None)
 
     user_id = session['user']
     bar_id = session.get('bar_id')
@@ -397,7 +446,7 @@ def dashboard():
             bar_name = bar_info
         
         # Formattazione timestamp (dal campo 'timestamp' che abbiamo aggiunto)
-        timestamp_consumazione_str = cons.get('timestamp')
+        timestamp_consumazione_str = cons.get('Time')
         display_timestamp = 'N/D'
         if timestamp_consumazione_str:
             try:
@@ -418,10 +467,10 @@ def dashboard():
             'drink_name': drink_name,
             'bar_name': bar_name,
             'timestamp': display_timestamp,
-            'peso_cocktail': cons.get('Peso (in g) del cocktail ricevuto da arduino', 'N/D'),
-            'tasso': cons.get("tasso calcolato g/L dall'algoritmo", 'N/D'),
-            'esito': cons.get("Risultato (positivo o negativo)", 'N/D'),
-            'stomaco': 'Pieno' if cons.get('Stomaco (bool se pieno o vuoto)', False) else 'Vuoto'
+            'peso_cocktail': cons.get('Peso (g)', 'N/D'),
+            'tasso': cons.get('Tasso Calcolato (g/L)', 'N/D'),
+            'esito': cons.get('Risultato', 'N/D'),
+            'stomaco': cons.get('Stomaco', 'N/D')
         })
 
     # La logica per user_drinks (aggregato) e classifica può rimanere o essere adattata
@@ -480,11 +529,78 @@ def dashboard():
             for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
         ][:10]
 
-        return render_template('dashboard.html',
-                             bar=None, # Indica che siamo in dashboard globale
-                             consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                             user_drinks_aggregati=user_drinks_list_aggregated, # Passiamo il vecchio aggregato
-                             classifica=classifica_generale)
+        # STATISTICHE UTENTE
+        num_consumazioni_utente = len(raw_consumazioni_utente)
+        tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
+                        for c in raw_consumazioni_utente 
+                        if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
+        tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
+        
+        esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
+        perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
+        
+        drink_preferito_utente = "N/A"
+        if user_drinks_list_aggregated: # user_drinks_list_aggregated è già calcolato per l'utente
+            drink_preferito_utente = max(user_drinks_list_aggregated, key=lambda x: x['conteggio'])['nome']
+
+        # STATISTICHE GENERALI (solo se in dashboard globale)
+        bar_preferito_utente = "N/A"
+        num_consumazioni_totali_sistema = 0
+        drink_popolare_sistema = "N/A"
+        bar_popolare_sistema = "N/A"
+
+        if not bar_id:
+            # Bar preferito dall'utente (conteggio consumazioni per bar per l'utente loggato)
+            consumi_utente_per_bar = {}
+            for cons_fields in raw_consumazioni_utente:
+                cons_data = cons_fields.get('fields', {})
+                bar_ids_list = cons_data.get('Bar', [])
+                if bar_ids_list:
+                    bar_id_cons = bar_ids_list[0]
+                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
+                    consumi_utente_per_bar[bar_name] = consumi_utente_per_bar.get(bar_name, 0) + 1
+            if consumi_utente_per_bar:
+                bar_preferito_utente = max(consumi_utente_per_bar, key=consumi_utente_per_bar.get)
+
+            # Statistiche di sistema (usano all_consumazioni_altri_utenti che sono TUTTE le consumazioni)
+            num_consumazioni_totali_sistema = len(all_consumazioni_altri_utenti)
+
+            conteggio_drink_sistema = {}
+            conteggio_bar_sistema = {}
+            for cons_fields in all_consumazioni_altri_utenti:
+                cons_data = cons_fields.get('fields', {})
+                drink_ids_list = cons_data.get('Drink', [])
+                bar_ids_list = cons_data.get('Bar', [])
+                if drink_ids_list:
+                    drink_id_cons = drink_ids_list[0]
+                    drink_name = next((d['fields'].get('Name', 'N/D') for d in drinks_all if d['id'] == drink_id_cons), 'N/D')
+                    conteggio_drink_sistema[drink_name] = conteggio_drink_sistema.get(drink_name, 0) + 1
+                if bar_ids_list:
+                    bar_id_cons = bar_ids_list[0]
+                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
+                    conteggio_bar_sistema[bar_name] = conteggio_bar_sistema.get(bar_name, 0) + 1
+            
+            if conteggio_drink_sistema:
+                drink_popolare_sistema = max(conteggio_drink_sistema, key=conteggio_drink_sistema.get)
+            if conteggio_bar_sistema:
+                bar_popolare_sistema = max(conteggio_bar_sistema, key=conteggio_bar_sistema.get)
+            
+            return render_template('dashboard.html',
+                                 bar=None, 
+                                 consumazioni_dettagliate=consumazioni_utente_dettagliate,
+                                 user_drinks_aggregati=user_drinks_list_aggregated, 
+                                 classifica=classifica_generale,
+                                 # Nuove statistiche utente
+                                 num_consumazioni_utente=num_consumazioni_utente,
+                                 tasso_medio_utente=round(tasso_medio_utente, 2),
+                                 drink_preferito_utente=drink_preferito_utente,
+                                 bar_preferito_utente=bar_preferito_utente, # Solo per globale
+                                 perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1),
+                                 # Nuove statistiche sistema (solo per globale)
+                                 num_consumazioni_totali_sistema=num_consumazioni_totali_sistema,
+                                 drink_popolare_sistema=drink_popolare_sistema,
+                                 bar_popolare_sistema=bar_popolare_sistema
+                                 )
 
     # Statistiche per bar selezionato
     # raw_consumazioni_utente sono già filtrate per bar_id se presente
@@ -523,11 +639,31 @@ def dashboard():
     
     current_bar_details = get_bar_by_id(bar_id)
 
+    # STATISTICHE UTENTE
+    num_consumazioni_utente = len(raw_consumazioni_utente)
+    tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
+                    for c in raw_consumazioni_utente 
+                    if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
+    tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
+    
+    esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
+    perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
+    
+    drink_preferito_utente = "N/A"
+    if user_drinks_list_specific_bar: # user_drinks_list_specific_bar è già calcolato per questo bar
+        drink_preferito_utente = max(user_drinks_list_specific_bar, key=lambda x: x['conteggio'])['nome']
+
     return render_template('dashboard.html',
-                         bar=current_bar_details, # Passa i dettagli del bar selezionato
+                         bar=current_bar_details, 
                          consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                         user_drinks_aggregati=user_drinks_list_specific_bar, # Aggregati per questo bar
-                         classifica=classifica_specific_bar)
+                         user_drinks_aggregati=user_drinks_list_specific_bar, 
+                         classifica=classifica_specific_bar,
+                         # Nuove statistiche utente (specifiche per questo bar)
+                         num_consumazioni_utente=num_consumazioni_utente,
+                         tasso_medio_utente=round(tasso_medio_utente, 2),
+                         drink_preferito_utente=drink_preferito_utente, # Sarà il preferito in questo bar
+                         perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1)
+                         )
 
 @app.route('/invia_dato', methods=['POST'])
 def invia_dato():

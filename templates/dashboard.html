@@ -23,11 +23,93 @@
     {% else %}
         <div class="text-center mb-4">
             <h2>La Tua Dashboard Globale</h2>
-            <p class="lead">Qui vedi tutte le tue consumazioni registrate e la classifica generale.</p>
+            <p class="lead">Qui vedi tutte le tue consumazioni registrate, le tue statistiche e quelle generali del sistema.</p>
             <a href="{{ url_for('seleziona_bar') }}" class="btn btn-lg btn-primary">
                 <i class="bi bi-geo-alt"></i> Seleziona un Bar Specifico
             </a>
         </div>
+    {% endif %}
+
+    <!-- SEZIONE STATISTICHE UTENTE -->
+    <div class="row mt-4 mb-4">
+        <div class="col-md-12">
+            <h4 class="mb-3">Le Tue Statistiche {% if bar and bar.fields %} (per {{ bar.fields.Name }}) {% else %} (Globali) {% endif %}</h4>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-clipboard-data"></i> Tue Consumazioni</h5>
+                    <p class="card-text fs-3 fw-bold">{{ num_consumazioni_utente }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-graph-up"></i> Tuo Tasso Medio</h5>
+                    <p class="card-text fs-3 fw-bold">{{ tasso_medio_utente }} g/L</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-heart-fill"></i> Tuo Drink Preferito</h5>
+                    <p class="card-text fs-5">{{ drink_preferito_utente }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-check-circle-fill"></i> Esiti "Positivi"</h5>
+                    <p class="card-text fs-3 fw-bold">{{ perc_esiti_positivi_utente }}%</p>
+                </div>
+            </div>
+        </div>
+        {% if not bar and bar_preferito_utente %} {# Solo per vista globale e se disponibile #}
+        <div class="col-md-3 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-shop"></i> Tuo Bar Preferito</h5>
+                    <p class="card-text fs-5">{{ bar_preferito_utente }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- SEZIONE STATISTICHE GENERALI DEL SISTEMA (solo globale) -->
+    {% if not bar %}
+    <div class="row mt-5 mb-4">
+        <div class="col-md-12">
+            <h4 class="mb-3"><i class="bi bi-bar-chart-line-fill"></i> Statistiche Generali del Sistema</h4>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-archive-fill"></i> Consumazioni Totali</h5>
+                    <p class="card-text fs-3 fw-bold">{{ num_consumazioni_totali_sistema }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-star-fill"></i> Drink Più Popolare</h5>
+                    <p class="card-text fs-5">{{ drink_popolare_sistema }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <h5 class="card-title"><i class="bi bi-building"></i> Bar Più Popolare</h5>
+                    <p class="card-text fs-5">{{ bar_popolare_sistema }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
     {% endif %}
 
     {% if consumazioni_dettagliate %}
@@ -56,9 +138,9 @@
                         <td>{{ cons.tasso if cons.tasso != 'N/D' else '-' }}</td>
                         <td>
                             {% if cons.esito == 'Positivo' %}
-                                <span class="badge bg-success">Positivo</span>
+                                <span class="badge bg-danger">Positivo</span>
                             {% elif cons.esito == 'Negativo' %}
-                                <span class="badge bg-danger">Negativo</span>
+                                <span class="badge bg-success">Negativo</span>
                             {% else %}
                                 <span class="badge bg-secondary">{{ cons.esito }}</span>
                             {% endif %}

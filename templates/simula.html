@@ -66,7 +66,10 @@
                                         {% if drink_selezionato and drink_selezionato.fields %}
                                             Drink: {{ drink_selezionato.fields.Name }}<br>
                                         {% endif %}
-                                        Tasso alcolemico stimato: {{ tasso }} g/L<br>
+                                        Tasso alcolemico stimato: <strong>{{ tasso }} g/L</strong><br>
+                                        {% if livello %}
+                                            Interpretazione: <em>{{ livello }}</em><br>
+                                        {% endif %}
                                         <small class="text-muted">Il tuo tasso alcolemico è inferiore al limite legale di 0.5 g/L</small>
                                     </p>
                                 </div>
@@ -82,7 +85,10 @@
                                         {% if drink_selezionato and drink_selezionato.fields %}
                                             Drink: {{ drink_selezionato.fields.Name }}<br>
                                         {% endif %}
-                                        Tasso alcolemico stimato: {{ tasso }} g/L<br>
+                                        Tasso alcolemico stimato: <strong>{{ tasso }} g/L</strong><br>
+                                        {% if livello %}
+                                            Interpretazione: <em>{{ livello }}</em><br>
+                                        {% endif %}
                                         <small class="text-muted">Il tuo tasso alcolemico supera il limite legale di 0.5 g/L</small>
                                     </p>
                                 </div>

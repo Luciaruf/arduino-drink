@@ -76,7 +76,7 @@ def interpreta_tasso_alcolemico(bac):
             'livello': 'Stai quasi raggiungendo il limite legale',
             'legale': True
         }
-    elif bac >=0.45 and bac < 0.5:
+    elif bac >=0.45 and bac <= 0.5:
         return {
             'livello': 'Attenzione, sei vicino al limite legale',
             'legale': True
