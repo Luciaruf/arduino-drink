@@ -17,6 +17,18 @@
                         <label for="password" class="form-label">Password</label>
                         <input type="password" class="form-control" id="password" name="password" required>
                     </div>
+                    <div class="mb-3">
+                        <label for="peso_kg" class="form-label">Peso (kg)</label>
+                        <input type="number" class="form-control" id="peso_kg" name="peso_kg" step="0.1" required placeholder="Es. 70.5">
+                    </div>
+                    <div class="mb-3">
+                        <label for="genere" class="form-label">Genere Biologico</label>
+                        <select class="form-select" id="genere" name="genere" required>
+                            <option value="" disabled selected>Seleziona...</option>
+                            <option value="uomo">Uomo</option>
+                            <option value="donna">Donna</option>
+                        </select>
+                    </div>
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary">Registrati</button>
                     </div>
