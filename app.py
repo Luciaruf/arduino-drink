@@ -195,19 +195,45 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
 
 def get_user_consumazioni(user_id=None, bar_id=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
-    if user_id and bar_id:
-        formula = f"AND(ARRAYJOIN({{User}}, ',') = '{user_id}', {{Bar}}='{bar_id}')"
-    elif user_id:
-        formula = f"ARRAYJOIN({{User}}, ',') = '{user_id}'"
-    elif bar_id:
-        formula = f"{{Bar}}='{bar_id}'"
-    else:
-        formula = ""
-    params = {}
-    if formula:
-        params['filterByFormula'] = formula
-    response = requests.get(url, headers=get_airtable_headers(), params=params)
-    return response.json().get('records', [])
+    
+    # Debug print to understand the input
+    print(f'DEBUG: get_user_consumazioni called with user_id={user_id}, bar_id={bar_id}')
+    
+    # Get all records and filter manually in Python
+    # This is more reliable than using Airtable formulas for array fields
+    response = requests.get(url, headers=get_airtable_headers())
+    
+    if response.status_code != 200:
+        print(f'ERROR: Failed to fetch consumazioni. Status code: {response.status_code}')
+        return []
+    
+    all_records = response.json().get('records', [])
+    print(f'DEBUG: Retrieved {len(all_records)} total records')
+    
+    # If no filters, return all records
+    if not user_id and not bar_id:
+        return all_records
+    
+    # Manual filtering in Python
+    filtered_records = []
+    for record in all_records:
+        fields = record.get('fields', {})
+        users = fields.get('User', [])
+        bars = fields.get('Bar', [])
+        
+        # Apply filters based on parameters
+        if user_id and bar_id:
+            if user_id in users and bar_id in bars:
+                filtered_records.append(record)
+        elif user_id:
+            if user_id in users:
+                filtered_records.append(record)
+        elif bar_id:
+            if bar_id in bars:
+                filtered_records.append(record)
+    
+    print(f'DEBUG: Filtered to {len(filtered_records)} records for user_id={user_id}, bar_id={bar_id}')
+    return filtered_records
 
 def get_bar_by_id(bar_id):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Bar/{bar_id}'
