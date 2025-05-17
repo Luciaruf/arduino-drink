@@ -4,10 +4,19 @@ import os
 from datetime import datetime, timedelta
 import requests
 import time
-from algoritmo import calcola_tasso_alcolemico_widmark, interpreta_tasso_alcolemico
+from algoritmo import (
+    calcola_tasso_alcolemico_widmark, 
+    interpreta_tasso_alcolemico, 
+    calcola_bac_cumulativo,
+    calcola_alcol_metabolizzato
+)
+import pytz  # Aggiungiamo pytz per gestire i fusi orari
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'super-segreta')
+
+# Definiamo il fuso orario italiano
+TIMEZONE = pytz.timezone('Europe/Rome')
 
 # Global variables for Arduino data
 dato_da_arduino = None
@@ -157,7 +166,8 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
             gradazione=gradazione_percent,
             stomaco=stomaco_per_algoritmo, # Passa la versione minuscola all'algoritmo
             ora_inizio=ora_inizio_str,
-            ora_fine=ora_fine_str # Ora include i 15 minuti di consumo
+            ora_fine=ora_fine_str, # Ora include i 15 minuti di consumo
+            bac_precedente=0.1267
         )
         
         interpretazione = interpreta_tasso_alcolemico(tasso_calcolato)
@@ -431,7 +441,8 @@ def simula():
                          esito=esito_visualizzato,
                          livello=livello_messaggio,
                          valore_peso_utilizzato=current_peso_cocktail_g,
-                         usando_peso_fisso_test=usando_peso_fisso_test)
+                         usando_peso_fisso_test=usando_peso_fisso_test,
+                         consumazione_id=consumazione_creata['id'] if consumazione_creata else None)
 
 @app.route('/dashboard')
 def dashboard():
@@ -724,6 +735,193 @@ def test_arduino():
     return render_template('test_arduino.html', 
                          dato=dato_da_arduino, 
                          tempo_trascorso=round(tempo_trascorso, 2))
+
+@app.route('/sorsi/<consumazione_id>', methods=['GET', 'POST'])
+def sorsi(consumazione_id):
+    if 'user' not in session:
+        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
+        return redirect(url_for('login'))
+    
+    # Recupera i dati della consumazione
+    consumazione = get_consumazione_by_id(consumazione_id)
+    if not consumazione:
+        flash('Consumazione non trovata', 'danger')
+        return redirect(url_for('simula'))
+    
+    # Verifica che la consumazione appartenga all'utente corrente
+    if consumazione['fields']['User'][0] != session['user']:
+        flash('Non hai i permessi per accedere a questa consumazione', 'danger')
+        return redirect(url_for('simula'))
+    
+    # Recupera i sorsi già registrati
+    sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
+    
+    if request.method == 'POST':
+        volume = float(request.form.get('volume', 50))
+        if volume > 0 and volume <= consumazione['fields']['Peso (g)']:
+            # Registra il nuovo sorso
+            nuovo_sorso = registra_sorso(consumazione_id, volume)
+            if nuovo_sorso:
+                flash('Sorso registrato con successo', 'success')
+                return redirect(url_for('sorsi', consumazione_id=consumazione_id))
+            else:
+                flash('Errore durante la registrazione del sorso', 'danger')
+        else:
+            flash('Volume non valido', 'danger')
+    
+    return render_template('sorsi.html',
+                         email=session['user_email'],
+                         consumazione_id=consumazione_id,
+                         volume_iniziale=consumazione['fields']['Peso (g)'],
+                         sorsi_registrati=sorsi_registrati)
+
+def get_consumazione_by_id(consumazione_id):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni/{consumazione_id}'
+    response = requests.get(url, headers=get_airtable_headers())
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def get_sorsi_by_consumazione(consumazione_id):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+    params = {
+        'filterByFormula': f"{{Consumazione}}='{consumazione_id}'"
+    }
+    response = requests.get(url, headers=get_airtable_headers(), params=params)
+    if response.status_code == 200:
+        return response.json().get('records', [])
+    return []
+
+def get_sorsi_giornalieri(email):
+    """Recupera tutti i sorsi dell'utente per la giornata corrente"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+    params = {
+        'filterByFormula': f"{{Email}}='{email}'"
+    }
+    
+    try:
+        response = requests.get(url, headers=get_airtable_headers(), params=params)
+        response.raise_for_status()
+        
+        data = response.json()
+        if 'records' not in data:
+            return []
+            
+        oggi = datetime.now(TIMEZONE).date()
+        sorsi_filtrati = []
+        
+        for sorso in data['records']:
+            if 'fields' in sorso and 'Ora inizio' in sorso['fields']:
+                timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
+                timestamp = timestamp.astimezone(TIMEZONE)
+                if timestamp.date() == oggi:
+                    sorsi_filtrati.append(sorso)
+        
+        return sorsi_filtrati
+        
+    except Exception as e:
+        print(f"Errore nel recupero dei sorsi giornalieri: {str(e)}")
+        return []
+
+def registra_sorso(consumazione_id, volume):
+    try:
+        # Recupera i dati necessari
+        consumazione = get_consumazione_by_id(consumazione_id)
+        if not consumazione:
+            return None
+        
+        user_id = consumazione['fields']['User'][0]
+        user = get_user_by_id(user_id)
+        if not user:
+            return None
+        
+        drink_id = consumazione['fields']['Drink'][0]
+        drink = get_drink_by_id(drink_id)
+        if not drink:
+            return None
+        
+        # Dati per il calcolo
+        peso_utente = user['fields']['Peso']
+        genere = user['fields']['Genere'].lower()
+        gradazione = drink['fields']['Gradazione']
+        email_utente = user['fields']['Email']
+        
+        # Recupera tutti i sorsi dell'utente per la giornata corrente
+        sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
+        
+        # Calcola il BAC cumulativo dei sorsi precedenti
+        lista_bevande_precedenti = []
+        for sorso in sorsi_giornalieri:
+            if 'fields' in sorso and 'Ora inizio' in sorso['fields']:
+                timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
+                timestamp = timestamp.astimezone(TIMEZONE)
+                lista_bevande_precedenti.append({
+                    'volume': sorso['fields']['Volume (g)'],
+                    'gradazione': float(gradazione),
+                    'ora_inizio': timestamp.strftime('%H:%M'),
+                    'ora_fine': (timestamp + timedelta(minutes=15)).strftime('%H:%M')
+                })
+        
+        # Se ci sono sorsi precedenti, calcola il loro BAC cumulativo
+        bac_precedente = 0.0
+        if lista_bevande_precedenti:
+            risultato_precedente = calcola_bac_cumulativo(
+                peso=float(peso_utente),
+                genere=genere,
+                lista_bevande=lista_bevande_precedenti,
+                stomaco=consumazione['fields']['Stomaco'].lower()
+            )
+            bac_precedente = risultato_precedente['bac_finale']
+        
+        # Usa l'ora corrente per il nuovo sorso
+        try:
+            ora_inizio = datetime.now(TIMEZONE)
+            ora_fine = ora_inizio + timedelta(minutes=15)
+        except Exception as e:
+            print(f"Errore nel calcolo delle date: {str(e)}")
+            return None
+        
+        try:
+            bac_sorso = calcola_tasso_alcolemico_widmark(
+                peso=float(peso_utente),
+                genere=genere,
+                volume=volume,
+                gradazione=float(gradazione),
+                stomaco=consumazione['fields']['Stomaco'].lower(),
+                ora_inizio=ora_inizio.strftime('%H:%M'),
+                ora_fine=ora_fine.strftime('%H:%M'),
+                bac_precedente=bac_precedente
+            )
+        except Exception as e:
+            print(f"Errore nel calcolo del BAC: {str(e)}")
+            return None
+        
+        # Registra il sorso in Airtable
+        url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+        data = {
+            'records': [{
+                'fields': {
+                    'Consumazioni Id': [consumazione_id],
+                    'Volume (g)': volume,
+                    'Email': email_utente,
+                    'BAC Temporaneo': round(bac_sorso, 3),
+                    'Ora inizio': ora_inizio.isoformat(),
+                    'Ora fine': ora_fine.isoformat()
+                }
+            }]
+        }
+        
+        response = requests.post(url, headers=get_airtable_headers(), json=data)
+        
+        if response.status_code != 200:
+            print(f"Errore Airtable - Status: {response.status_code}")
+            return None
+            
+        return response.json()['records'][0]
+        
+    except Exception as e:
+        print(f"Errore durante la registrazione del sorso: {str(e)}")
+        return None
 
 if __name__ == '__main__':
     app.run(debug=True)

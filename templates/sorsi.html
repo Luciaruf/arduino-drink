@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Registra Sorsi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">Registra Sorsi</h2>
+                
+                <div class="alert alert-info">
+                    <p class="mb-0">
+                        <strong>Informazioni Consumazione:</strong><br>
+                        Email: {{ email }}<br>
+                        ID Consumazione: {{ consumazione_id }}<br>
+                        Volume iniziale: {{ volume_iniziale }}ml
+                    </p>
+                </div>
+
+                <form method="post" action="{{ url_for('sorsi', consumazione_id=consumazione_id) }}">
+                    <div class="mb-3">
+                        <label for="volume" class="form-label">Volume del sorso (ml)</label>
+                        <input type="number" class="form-control" id="volume" name="volume" 
+                               min="1" max="{{ volume_iniziale }}" value="50" required>
+                        <div class="form-text">Inserisci il volume del sorso in millilitri (max {{ volume_iniziale }}ml)</div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">Registra Sorso</button>
+                    </div>
+                </form>
+
+                {% if sorsi_registrati %}
+                <div class="mt-4">
+                    <h4>Sorsi Registrati</h4>
+                    <ul class="list-group">
+                        {% for sorso in sorsi_registrati %}
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    Volume: {{ sorso.fields['Volume (g)'] }}g
+                                </div>
+                                <div>
+                                    BAC: {{ sorso.fields['BAC Temporaneo'] }} g/L
+                                </div>
+                                <div class="text-muted">
+                                    <small>
+                                        Registrato: {{ sorso.createdTime|replace('T', ' ')|replace('Z', '') }}
+                                    </small>
+                                </div>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
