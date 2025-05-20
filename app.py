@@ -792,10 +792,10 @@ def get_sorsi_by_consumazione(consumazione_id):
     return []
 
 def get_sorsi_giornalieri(email, consumazione_id=None):
-    """Recupera tutti i sorsi dell'utente per la giornata corrente e/o per una specifica consumazione"""
+    """Recupera tutti i sorsi dell'utente per la giornata corrente ordinati per data"""
     url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
     params = {
-        'filterByFormula': f"{{Email}}='{email}'"
+        'filterByFormula': f"{{Email}}='{email}'",
     }
     
     try:
@@ -814,10 +814,9 @@ def get_sorsi_giornalieri(email, consumazione_id=None):
                 timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
                 timestamp = timestamp.astimezone(TIMEZONE)
                 
-                # Filtra per data e opzionalmente per consumazione
+                # Filtra solo per data odierna
                 if timestamp.date() == oggi:
-                    if consumazione_id is None or sorso['fields'].get('Consumazioni Id', [None])[0] == consumazione_id:
-                        sorsi_filtrati.append(sorso)
+                    sorsi_filtrati.append(sorso)
         
         return sorsi_filtrati
         
@@ -851,90 +850,63 @@ def registra_sorso(consumazione_id, volume):
         # Recupera tutti i sorsi dell'utente per la giornata corrente
         sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
         
-        # Calcola il BAC cumulativo dei sorsi precedenti
-        lista_bevande_precedenti = []
-        for sorso in sorsi_giornalieri:
-            if 'fields' in sorso and 'Ora inizio' in sorso['fields']:
-                # Recupera la consumazione associata al sorso
-                consumazione_sorso_id = sorso['fields'].get('Consumazioni Id', [None])[0]
-                if consumazione_sorso_id:
-                    consumazione_sorso = get_consumazione_by_id(consumazione_sorso_id)
-                    if consumazione_sorso and 'Drink' in consumazione_sorso['fields']:
-                        drink_sorso_id = consumazione_sorso['fields']['Drink'][0]
-                        drink_sorso = get_drink_by_id(drink_sorso_id)
-                        if drink_sorso and 'Gradazione' in drink_sorso['fields']:
-                            gradazione_sorso = float(drink_sorso['fields']['Gradazione'])
-                            
-                            timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
-                            timestamp = timestamp.astimezone(TIMEZONE)
-                            lista_bevande_precedenti.append({
-                                'volume': sorso['fields']['Volume (g)'],
-                                'gradazione': gradazione_sorso,
-                                'ora_inizio': timestamp.strftime('%H:%M'),
-                                'ora_fine': (timestamp + timedelta(minutes=15)).strftime('%H:%M')
-                            })
-
-        # Se ci sono sorsi precedenti, calcola il loro BAC cumulativo
-        bac_precedente = 0.0
-        bac = 0.0
-        alcol_metabolizzato = 0.0
-        if lista_bevande_precedenti:
-            risultato_precedente = calcola_bac_cumulativo(
-                peso=float(peso_utente),
-                genere=genere,
-                lista_bevande=lista_bevande_precedenti,
-                stomaco=consumazione['fields']['Stomaco'].lower()
-            )
-            bac_precedente += risultato_precedente['bac_finale']
-            
-            # Calcola l'alcol metabolizzato dai sorsi precedenti
-            ora_attuale = datetime.now(TIMEZONE)
-            for bevanda in lista_bevande_precedenti:
-                # Usa direttamente le stringhe orarie dalla lista_bevande_precedenti
-                ora_inizio_str = bevanda['ora_inizio']
-                ora_fine_str = bevanda['ora_fine']
-                
-                # Calcola il tempo trascorso in ore
-                ora_inizio_dt = datetime.strptime(ora_inizio_str, '%H:%M')
-                ora_inizio_dt = TIMEZONE.localize(datetime.combine(ora_attuale.date(), ora_inizio_dt.time()))
-                tempo_trascorso = (ora_attuale - ora_inizio_dt).total_seconds() / 3600
-                
-                # Calcola l'alcol metabolizzato per questa bevanda usando la sua gradazione specifica
-                bac += calcola_alcol_metabolizzato(
-                    bac=calcola_tasso_alcolemico_widmark(
-                        peso=float(peso_utente),
-                        genere=genere,
-                        volume=bevanda['volume'],  # Usa il volume del sorso precedente
-                        gradazione=bevanda['gradazione'],  # Usa la gradazione del sorso precedente
-                        stomaco=consumazione['fields']['Stomaco'].lower(),
-                        ora_inizio=ora_inizio_str,
-                        ora_fine=ora_fine_str
-                    ),
-                    tempo_ore=tempo_trascorso
-                )
-                
         # Usa l'ora corrente per il nuovo sorso
         try:
             ora_inizio = datetime.now(TIMEZONE)
-            ora_fine = ora_inizio + timedelta(minutes=15)
+            ora_fine = ora_inizio + timedelta(minutes=1)
         except Exception as e:
             print(f"Errore nel calcolo delle date: {str(e)}")
             return None
-        
+
+        # Calcola il BAC per il nuovo sorso usando il volume del sorso
         try:
-            # Calcola il BAC per il nuovo sorso
             bac_sorso = calcola_tasso_alcolemico_widmark(
                 peso=float(peso_utente),
                 genere=genere,
-                volume=volume,
+                volume=float(volume),  # Usa il volume del sorso passato come parametro
                 gradazione=float(gradazione),
                 stomaco=consumazione['fields']['Stomaco'].lower(),
                 ora_inizio=ora_inizio.strftime('%H:%M'),
-                ora_fine = ora_inizio.strftime('%H:%M')
+                ora_fine=ora_fine.strftime('%H:%M')
             )
         except Exception as e:
             print(f"Errore nel calcolo del BAC: {str(e)}")
             return None
+
+        # Se non ci sono sorsi precedenti, usa solo il BAC del nuovo sorso
+        if not sorsi_giornalieri:
+            bac_totale = bac_sorso
+        else:
+            # Trova il sorso con l'ora di fine più vicina all'ora di inizio del nuovo sorso
+            ultimo_sorso = None
+            min_diff = float('inf')
+            
+            for sorso in sorsi_giornalieri:
+                if 'fields' in sorso and 'Ora fine' in sorso['fields']:
+                    ora_fine_sorso = datetime.fromisoformat(sorso['fields']['Ora fine'].replace('Z', '+00:00'))
+                    ora_fine_sorso = ora_fine_sorso.astimezone(TIMEZONE)
+                    diff = abs((ora_inizio - ora_fine_sorso).total_seconds())
+                    
+                    if diff < min_diff:
+                        min_diff = diff
+                        ultimo_sorso = sorso
+            
+            if ultimo_sorso:
+                bac_precedente = ultimo_sorso['fields'].get('BAC Temporaneo', 0.0)
+                
+                # Calcola il tempo trascorso dall'ultimo sorso
+                ora_fine_ultimo = datetime.fromisoformat(ultimo_sorso['fields']['Ora fine'].replace('Z', '+00:00'))
+                ora_fine_ultimo = ora_fine_ultimo.astimezone(TIMEZONE)
+                tempo_trascorso = (ora_inizio - ora_fine_ultimo).total_seconds() / 3600
+                
+                # Calcola l'alcol metabolizzato nel tempo trascorso
+                bac_vecchio = calcola_alcol_metabolizzato(bac_precedente, tempo_trascorso)
+                
+                # Il BAC totale è: BAC precedente metabolizzato + BAC nuovo sorso
+                bac_totale = bac_vecchio + bac_sorso
+                print(bac_precedente, bac_vecchio, bac_sorso)
+            else:
+                bac_totale = bac_sorso
         
         # Registra il sorso in Airtable
         url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
@@ -944,7 +916,7 @@ def registra_sorso(consumazione_id, volume):
                     'Consumazioni Id': [consumazione_id],
                     'Volume (g)': volume,
                     'Email': email_utente,
-                    'BAC Temporaneo': round(bac + bac_sorso, 3),
+                    'BAC Temporaneo': round(bac_totale, 3),
                     'Ora inizio': ora_inizio.isoformat(),
                     'Ora fine': ora_fine.isoformat()
                 }

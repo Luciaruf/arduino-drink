@@ -252,5 +252,3 @@ if __name__ == "__main__":
     
     tempo_sober = calcola_tempo_sober(risultato['bac_finale'])
     print(f"\nTempo stimato per tornare sobri: {tempo_sober}")
-
-    
