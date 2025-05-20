@@ -876,6 +876,8 @@ def registra_sorso(consumazione_id, volume):
 
         # Se ci sono sorsi precedenti, calcola il loro BAC cumulativo
         bac_precedente = 0.0
+        bac = 0.0
+        alcol_metabolizzato = 0.0
         if lista_bevande_precedenti:
             risultato_precedente = calcola_bac_cumulativo(
                 peso=float(peso_utente),
@@ -884,7 +886,33 @@ def registra_sorso(consumazione_id, volume):
                 stomaco=consumazione['fields']['Stomaco'].lower()
             )
             bac_precedente += risultato_precedente['bac_finale']
-        
+            
+            # Calcola l'alcol metabolizzato dai sorsi precedenti
+            ora_attuale = datetime.now(TIMEZONE)
+            for bevanda in lista_bevande_precedenti:
+                # Usa direttamente le stringhe orarie dalla lista_bevande_precedenti
+                ora_inizio_str = bevanda['ora_inizio']
+                ora_fine_str = bevanda['ora_fine']
+                
+                # Calcola il tempo trascorso in ore
+                ora_inizio_dt = datetime.strptime(ora_inizio_str, '%H:%M')
+                ora_inizio_dt = TIMEZONE.localize(datetime.combine(ora_attuale.date(), ora_inizio_dt.time()))
+                tempo_trascorso = (ora_attuale - ora_inizio_dt).total_seconds() / 3600
+                
+                # Calcola l'alcol metabolizzato per questa bevanda usando la sua gradazione specifica
+                bac += calcola_alcol_metabolizzato(
+                    bac=calcola_tasso_alcolemico_widmark(
+                        peso=float(peso_utente),
+                        genere=genere,
+                        volume=bevanda['volume'],  # Usa il volume del sorso precedente
+                        gradazione=bevanda['gradazione'],  # Usa la gradazione del sorso precedente
+                        stomaco=consumazione['fields']['Stomaco'].lower(),
+                        ora_inizio=ora_inizio_str,
+                        ora_fine=ora_fine_str
+                    ),
+                    tempo_ore=tempo_trascorso
+                )
+                
         # Usa l'ora corrente per il nuovo sorso
         try:
             ora_inizio = datetime.now(TIMEZONE)
@@ -894,6 +922,7 @@ def registra_sorso(consumazione_id, volume):
             return None
         
         try:
+            # Calcola il BAC per il nuovo sorso
             bac_sorso = calcola_tasso_alcolemico_widmark(
                 peso=float(peso_utente),
                 genere=genere,
@@ -901,13 +930,12 @@ def registra_sorso(consumazione_id, volume):
                 gradazione=float(gradazione),
                 stomaco=consumazione['fields']['Stomaco'].lower(),
                 ora_inizio=ora_inizio.strftime('%H:%M'),
-                ora_fine=ora_fine.strftime('%H:%M')
+                ora_fine = ora_inizio.strftime('%H:%M')
             )
-
         except Exception as e:
             print(f"Errore nel calcolo del BAC: {str(e)}")
             return None
-                
+        
         # Registra il sorso in Airtable
         url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
         data = {
@@ -916,7 +944,7 @@ def registra_sorso(consumazione_id, volume):
                     'Consumazioni Id': [consumazione_id],
                     'Volume (g)': volume,
                     'Email': email_utente,
-                    'BAC Temporaneo': round(bac_precedente+bac_sorso, 3),
+                    'BAC Temporaneo': round(bac + bac_sorso, 3),
                     'Ora inizio': ora_inizio.isoformat(),
                     'Ora fine': ora_fine.isoformat()
                 }
