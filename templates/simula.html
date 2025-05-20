@@ -95,6 +95,14 @@
                             </div>
                         </div>
                     {% endif %}
+
+                    {% if consumazione_id %}
+                    <div class="d-grid gap-2 mt-4">
+                        <a href="{{ url_for('sorsi', consumazione_id=consumazione_id) }}" class="btn btn-outline-primary">
+                            <i class="bi bi-cup-straw"></i> Registra Sorsi
+                        </a>
+                    </div>
+                    {% endif %}
                 {% elif request.method == 'POST' and (tasso is none or esito is none) %}
                     <div class="alert alert-warning mt-4">
                         Non è stato possibile calcolare il tasso alcolemico. Verifica i dati inseriti o che il peso da Arduino sia disponibile.
