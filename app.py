@@ -167,7 +167,6 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
             stomaco=stomaco_per_algoritmo, # Passa la versione minuscola all'algoritmo
             ora_inizio=ora_inizio_str,
             ora_fine=ora_fine_str, # Ora include i 15 minuti di consumo
-            bac_precedente=0.1267
         )
         
         interpretazione = interpreta_tasso_alcolemico(tasso_calcolato)
@@ -792,8 +791,8 @@ def get_sorsi_by_consumazione(consumazione_id):
         return response.json().get('records', [])
     return []
 
-def get_sorsi_giornalieri(email):
-    """Recupera tutti i sorsi dell'utente per la giornata corrente"""
+def get_sorsi_giornalieri(email, consumazione_id=None):
+    """Recupera tutti i sorsi dell'utente per la giornata corrente e/o per una specifica consumazione"""
     url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
     params = {
         'filterByFormula': f"{{Email}}='{email}'"
@@ -814,8 +813,11 @@ def get_sorsi_giornalieri(email):
             if 'fields' in sorso and 'Ora inizio' in sorso['fields']:
                 timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
                 timestamp = timestamp.astimezone(TIMEZONE)
+                
+                # Filtra per data e opzionalmente per consumazione
                 if timestamp.date() == oggi:
-                    sorsi_filtrati.append(sorso)
+                    if consumazione_id is None or sorso['fields'].get('Consumazioni Id', [None])[0] == consumazione_id:
+                        sorsi_filtrati.append(sorso)
         
         return sorsi_filtrati
         
@@ -853,15 +855,25 @@ def registra_sorso(consumazione_id, volume):
         lista_bevande_precedenti = []
         for sorso in sorsi_giornalieri:
             if 'fields' in sorso and 'Ora inizio' in sorso['fields']:
-                timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
-                timestamp = timestamp.astimezone(TIMEZONE)
-                lista_bevande_precedenti.append({
-                    'volume': sorso['fields']['Volume (g)'],
-                    'gradazione': float(gradazione),
-                    'ora_inizio': timestamp.strftime('%H:%M'),
-                    'ora_fine': (timestamp + timedelta(minutes=15)).strftime('%H:%M')
-                })
-        
+                # Recupera la consumazione associata al sorso
+                consumazione_sorso_id = sorso['fields'].get('Consumazioni Id', [None])[0]
+                if consumazione_sorso_id:
+                    consumazione_sorso = get_consumazione_by_id(consumazione_sorso_id)
+                    if consumazione_sorso and 'Drink' in consumazione_sorso['fields']:
+                        drink_sorso_id = consumazione_sorso['fields']['Drink'][0]
+                        drink_sorso = get_drink_by_id(drink_sorso_id)
+                        if drink_sorso and 'Gradazione' in drink_sorso['fields']:
+                            gradazione_sorso = float(drink_sorso['fields']['Gradazione'])
+                            
+                            timestamp = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
+                            timestamp = timestamp.astimezone(TIMEZONE)
+                            lista_bevande_precedenti.append({
+                                'volume': sorso['fields']['Volume (g)'],
+                                'gradazione': gradazione_sorso,
+                                'ora_inizio': timestamp.strftime('%H:%M'),
+                                'ora_fine': (timestamp + timedelta(minutes=15)).strftime('%H:%M')
+                            })
+
         # Se ci sono sorsi precedenti, calcola il loro BAC cumulativo
         bac_precedente = 0.0
         if lista_bevande_precedenti:
@@ -871,7 +883,7 @@ def registra_sorso(consumazione_id, volume):
                 lista_bevande=lista_bevande_precedenti,
                 stomaco=consumazione['fields']['Stomaco'].lower()
             )
-            bac_precedente = risultato_precedente['bac_finale']
+            bac_precedente += risultato_precedente['bac_finale']
         
         # Usa l'ora corrente per il nuovo sorso
         try:
@@ -889,13 +901,13 @@ def registra_sorso(consumazione_id, volume):
                 gradazione=float(gradazione),
                 stomaco=consumazione['fields']['Stomaco'].lower(),
                 ora_inizio=ora_inizio.strftime('%H:%M'),
-                ora_fine=ora_fine.strftime('%H:%M'),
-                bac_precedente=bac_precedente
+                ora_fine=ora_fine.strftime('%H:%M')
             )
+
         except Exception as e:
             print(f"Errore nel calcolo del BAC: {str(e)}")
             return None
-        
+                
         # Registra il sorso in Airtable
         url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
         data = {
@@ -904,7 +916,7 @@ def registra_sorso(consumazione_id, volume):
                     'Consumazioni Id': [consumazione_id],
                     'Volume (g)': volume,
                     'Email': email_utente,
-                    'BAC Temporaneo': round(bac_sorso, 3),
+                    'BAC Temporaneo': round(bac_precedente+bac_sorso, 3),
                     'Ora inizio': ora_inizio.isoformat(),
                     'Ora fine': ora_fine.isoformat()
                 }
@@ -922,6 +934,6 @@ def registra_sorso(consumazione_id, volume):
     except Exception as e:
         print(f"Errore durante la registrazione del sorso: {str(e)}")
         return None
-
+    
 if __name__ == '__main__':
     app.run(debug=True)

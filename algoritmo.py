@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-def calcola_tasso_alcolemico_widmark(peso, genere, volume, gradazione, stomaco, ora_inizio, ora_fine, bac_precedente):
+def calcola_tasso_alcolemico_widmark(peso, genere, volume, gradazione, stomaco, ora_inizio, ora_fine):
     """
     Calcola il tasso alcolemico usando la formula di Widmark per una singola bevanda.
     
@@ -19,6 +19,7 @@ def calcola_tasso_alcolemico_widmark(peso, genere, volume, gradazione, stomaco, 
     Returns:
         float: Tasso alcolemico in g/l
     """
+    bac_totale = 0.0
     # Costanti di Widmark
     r = 0.68 if genere == 'uomo' else 0.55  # Fattore di distribuzione
     beta = 0.15  # Tasso di eliminazione dell'alcol (g/l per ora)
@@ -53,10 +54,9 @@ def calcola_tasso_alcolemico_widmark(peso, genere, volume, gradazione, stomaco, 
     
     # BAC non negativo
     bac_nuovo = max(0, bac_nuovo)
-    
-    # Aggiungi il BAC precedente
-    bac_totale = bac_precedente + bac_nuovo
-    
+
+    bac_totale += bac_nuovo
+
     return round(bac_totale, 3)
 
 def calcola_alcol_metabolizzato(bac, tempo_ore):
@@ -132,7 +132,7 @@ def calcola_bac_cumulativo(peso, genere, lista_bevande, stomaco):
             )
             # Converti in ore per il calcolo del metabolismo
             tempo_ore = tempo_trascorso / 60 if unità == 'minuti' else tempo_trascorso
-            bac_totale = calcola_alcol_metabolizzato(bac_totale, tempo_ore)
+            bac_totale += calcola_tasso_alcolemico_widmark(peso, genere, bevanda_precedente['volume'], bevanda_precedente['gradazione'], stomaco, bevanda_precedente['ora_fine'], bevanda_precedente['ora_inizio'])
             
             storia_metabolismo.append({
                 'tempo_trascorso': tempo_trascorso,
@@ -141,15 +141,14 @@ def calcola_bac_cumulativo(peso, genere, lista_bevande, stomaco):
             })
         
         # Calcola il nuovo BAC aggiungendo la bevanda corrente
-        bac_totale = calcola_tasso_alcolemico_widmark(
+        bac_totale += calcola_tasso_alcolemico_widmark(
             peso=peso,
             genere=genere,
             volume=bevanda['volume'],
             gradazione=bevanda['gradazione'],
             stomaco=stomaco,
             ora_inizio=bevanda['ora_inizio'],
-            ora_fine=bevanda['ora_fine'],
-            bac_precedente=bac_totale
+            ora_fine=bevanda['ora_fine']
         )
     
     return {
