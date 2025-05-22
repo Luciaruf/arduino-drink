@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Drink Master Game{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- User Profile Card -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="mb-3">
+                        <i class="bi bi-person-circle display-1 text-primary"></i>
+                    </div>
+                    <h3 class="card-title h4">{{ user.fields.Email if user and user.fields else 'Drink Master' }}</h3>
+                    <div class="d-flex justify-content-center align-items-center gap-2 mb-3">
+                        <span class="badge bg-primary rounded-pill">Level {{ game_data.level }}</span>
+                        <span class="badge bg-warning text-dark rounded-pill">
+                            <i class="bi bi-star-fill"></i> {{ game_data.points }} Points
+                        </span>
+                    </div>
+                    <div class="progress mb-2" style="height: 8px;">
+                        <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             aria-valuenow="{{ game_data.xp }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100"
+                             data-width="{{ game_data.xp }}"></div>
+                    </div>
+                    <small class="text-muted">{{ game_data.xp }}/100 XP to next level</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Achievements Section -->
+        <div class="col-md-8">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h4 class="card-title mb-4">Your Achievements</h4>
+                    <div class="row g-4">
+                        {% set achievements = [
+                            ('safe_driver', 'trophy-fill', 'warning', 'Safe Driver', 'Complete {total} safe drinking sessions'),
+                            ('mix_master', 'cup-hot-fill', 'danger', 'Mix Master', 'Try {total} different drinks'),
+                            ('time_keeper', 'clock-history', 'info', 'Time Keeper', 'Track {total} drinking sessions')
+                        ] %}
+                        
+                        {% for achievement_id, icon, color, title, description in achievements %}
+                        <div class="col-md-4">
+                            <div class="achievement-card text-center p-3 border rounded h-100">
+                                <i class="bi bi-{{ icon }} text-{{ color }} display-4 mb-3"></i>
+                                <h5 class="h6 mb-2">{{ title }}</h5>
+                                <p class="small text-muted mb-3">{{ description.format(total=game_data.achievements[achievement_id].total) }}</p>
+                                <div class="progress mb-2" style="height: 6px;">
+                                    <div class="progress-bar bg-success progress-bar-striped" 
+                                         role="progressbar" 
+                                         aria-valuenow="{{ game_data.achievements[achievement_id].progress }}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="{{ game_data.achievements[achievement_id].total }}"
+                                         data-width="{{ (game_data.achievements[achievement_id].progress / game_data.achievements[achievement_id].total * 100)|round }}"></div>
+                                </div>
+                                <small class="text-muted">{{ game_data.achievements[achievement_id].progress }}/{{ game_data.achievements[achievement_id].total }}</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daily Challenge -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h4 class="card-title mb-0">Daily Challenge</h4>
+                        <span class="badge bg-primary rounded-pill">+50 Points</span>
+                    </div>
+                    <div class="challenge-card p-4 bg-light rounded">
+                        <h5 class="h6 mb-3">Responsible Drinking Streak</h5>
+                        <p class="mb-4">Complete {{ game_data.daily_challenge.total_sessions }} safe drinking sessions today to earn bonus points!</p>
+                        <div class="d-flex gap-3">
+                            {% for i in range(game_data.daily_challenge.total_sessions) %}
+                            <div class="challenge-step p-3 border rounded text-center flex-grow-1">
+                                <i class="bi bi-{{ 'check-circle-fill text-success' if i < game_data.daily_challenge.completed_sessions else 'circle text-muted' }} fs-4"></i>
+                                <span class="d-block small mt-2">Session {{ i + 1 }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h4 class="card-title mb-4">Top Drink Masters</h4>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Player</th>
+                                    <th>Level</th>
+                                    <th>Points</th>
+                                    <th>Achievements</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for player in leaderboard %}
+                                <tr class="{{ 'table-warning' if loop.index == 1 else 'table-secondary' if loop.index == 2 else 'table-danger' if loop.index == 3 else 'table-primary' if player.is_current_user else '' }}">
+                                    <td>
+                                        {% if loop.index == 1 %}
+                                            <i class="bi bi-trophy-fill text-warning"></i>
+                                        {% elif loop.index == 2 %}
+                                            <i class="bi bi-trophy-fill text-secondary"></i>
+                                        {% elif loop.index == 3 %}
+                                            <i class="bi bi-trophy-fill text-danger"></i>
+                                        {% elif player.is_current_user %}
+                                            <i class="bi bi-person-fill text-primary"></i>
+                                        {% endif %}
+                                        {{ loop.index }}
+                                    </td>
+                                    <td>
+                                        {{ player.email }}
+                                        {% if player.is_current_user %}
+                                            <span class="badge bg-primary">Tu</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ player.level }}</td>
+                                    <td>{{ player.points }}</td>
+                                    <td>{{ player.achievements_completed }}/{{ player.total_achievements }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.achievement-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+.achievement-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.challenge-step {
+    transition: all 0.3s;
+}
+
+.challenge-step:hover {
+    background-color: #f8f9fa;
+    transform: translateY(-2px);
+}
+
+.progress {
+    background-color: #e9ecef;
+    border-radius: 0.25rem;
+}
+
+.progress-bar {
+    transition: width .6s ease;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+        bar.style.width = bar.getAttribute('data-width') + '%';
+    });
+});
+</script>
+{% endblock %} 

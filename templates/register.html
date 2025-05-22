@@ -7,22 +7,22 @@
     <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm">
             <div class="card-body">
-                <h2 class="card-title text-center mb-4">Registrazione</h2>
+                <h2 class="card-title text-center mb-4"><i class="bi bi-person-plus me-2"></i> Registrazione</h2>
                 <form method="post" action="{{ url_for('register') }}">
                     <div class="mb-3">
-                        <label for="email" class="form-label">Email</label>
+                        <label for="email" class="form-label"><i class="bi bi-envelope me-2"></i>Email</label>
                         <input type="email" class="form-control" id="email" name="email" required>
                     </div>
                     <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
+                        <label for="password" class="form-label"><i class="bi bi-lock me-2"></i>Password</label>
                         <input type="password" class="form-control" id="password" name="password" required>
                     </div>
                     <div class="mb-3">
-                        <label for="peso_kg" class="form-label">Peso (kg)</label>
+                        <label for="peso_kg" class="form-label"><i class="bi bi-rulers me-2"></i>Peso (kg)</label>
                         <input type="number" class="form-control" id="peso_kg" name="peso_kg" step="0.1" required placeholder="Es. 70.5">
                     </div>
                     <div class="mb-3">
-                        <label for="genere" class="form-label">Genere Biologico</label>
+                        <label for="genere" class="form-label"><i class="bi bi-gender-ambiguous me-2"></i>Genere Biologico</label>
                         <select class="form-select" id="genere" name="genere" required>
                             <option value="" disabled selected>Seleziona...</option>
                             <option value="uomo">Uomo</option>
@@ -30,11 +30,11 @@
                         </select>
                     </div>
                     <div class="d-grid">
-                        <button type="submit" class="btn btn-primary">Registrati</button>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-person-plus me-2"></i> Registrati</button>
                     </div>
                 </form>
                 <div class="text-center mt-3">
-                    <p class="mb-0">Hai già un account? <a href="{{ url_for('login') }}">Login</a></p>
+                    <p class="mb-0">Hai già un account? <a href="{{ url_for('login') }}">Login <i class="bi bi-box-arrow-in-right"></i></a></p>
                 </div>
             </div>
         </div>

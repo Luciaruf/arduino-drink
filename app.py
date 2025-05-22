@@ -111,7 +111,6 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
 
     if peso_utente_kg is None or genere_utente is None:
         print(f"Errore: Peso o Genere mancanti per l'utente {user_id}.")
-        # Potresti voler sollevare un'eccezione o gestire diversamente
         return None
 
     # 2. Recupera dati drink (gradazione, alcolico)
@@ -121,24 +120,22 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
         return None
 
     drink_fields = drink_data['fields']
-    print(f"DEBUG SIMULA: Dati del drink recuperati da Airtable: {drink_fields}") # DEBUG PRINT
+    print(f"DEBUG SIMULA: Dati del drink recuperati da Airtable: {drink_fields}")
     
     gradazione_drink = drink_fields.get('Gradazione')
     valore_alcolico_da_airtable = drink_fields.get('Alcolico (bool)')
     is_alcolico = True if valore_alcolico_da_airtable == '1' else False
     
-    print(f"DEBUG SIMULA: gradazione_drink={gradazione_drink}, tipo={type(gradazione_drink)}") # DEBUG PRINT
-    print(f"DEBUG SIMULA: valore_alcolico_da_airtable={valore_alcolico_da_airtable}, tipo={type(valore_alcolico_da_airtable)}") # DEBUG PRINT
-    print(f"DEBUG SIMULA: is_alcolico={is_alcolico}, tipo={type(is_alcolico)}") # DEBUG PRINT
+    print(f"DEBUG SIMULA: gradazione_drink={gradazione_drink}, tipo={type(gradazione_drink)}")
+    print(f"DEBUG SIMULA: valore_alcolico_da_airtable={valore_alcolico_da_airtable}, tipo={type(valore_alcolico_da_airtable)}")
+    print(f"DEBUG SIMULA: is_alcolico={is_alcolico}, tipo={type(is_alcolico)}")
 
     tasso_calcolato = 0.0
     esito_calcolo = 'Negativo'
 
-    # Definisci stomaco_str qui, in base all'input booleano
     stomaco_str = 'Pieno' if stomaco_pieno_bool else 'Vuoto'
 
     if is_alcolico and gradazione_drink is not None and gradazione_drink > 0:
-        # 3. Prepara parametri per l'algoritmo
         volume_ml = float(peso_cocktail_g)
         gradazione_percent = float(gradazione_drink)
         
@@ -147,14 +144,10 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
             print(f"Errore: Genere non valido '{genere_str}' per l'utente {user_id}.")
             return None 
 
-        # stomaco_str è già definito sopra, qui era specifico per l'algoritmo che voleva minuscolo
-        # ma ora l'algoritmo riceve già 'pieno' o 'vuoto' e Airtable vuole 'Pieno' o 'Vuoto'
-        # quindi la definizione sopra va bene per entrambi se l'algoritmo gestisce maiuscole/minuscole indifferentemente
-        # Oppure, per l'algoritmo, usiamo .lower()
-        stomaco_per_algoritmo = stomaco_str.lower() # Assicuriamoci sia minuscolo per l'algoritmo
+        stomaco_per_algoritmo = stomaco_str.lower()
         
         ora_inizio_dt = timestamp_consumazione
-        ora_fine_dt = ora_inizio_dt + timedelta(hours=2) # Modificato da 15 minuti a 2 ore
+        ora_fine_dt = ora_inizio_dt + timedelta(hours=2)
 
         ora_inizio_str = ora_inizio_dt.strftime('%H:%M')
         ora_fine_str = ora_fine_dt.strftime('%H:%M')
@@ -164,18 +157,16 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
             genere=genere_str,
             volume=volume_ml,
             gradazione=gradazione_percent,
-            stomaco=stomaco_per_algoritmo, # Passa la versione minuscola all'algoritmo
+            stomaco=stomaco_per_algoritmo,
             ora_inizio=ora_inizio_str,
-            ora_fine=ora_fine_str, # Ora include i 15 minuti di consumo
+            ora_fine=ora_fine_str,
         )
         
         interpretazione = interpreta_tasso_alcolemico(tasso_calcolato)
-        # Esito: "Negativo" se legale (<=0.5), "Positivo" se non legale (>0.5)
         esito_calcolo = 'Negativo' if interpretazione['legale'] else 'Positivo'
     else:
-        # Drink non alcolico o gradazione zero
         tasso_calcolato = 0.0
-        esito_calcolo = 'Negativo' # Considerato "negativo" all'alcol se non c'è alcol o è analcolico
+        esito_calcolo = 'Negativo'
 
     # 4. Salva in Airtable
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
@@ -199,6 +190,39 @@ def create_consumazione(user_id, drink_id, bar_id, peso_cocktail_g, stomaco_pien
         print(f"Errore Airtable durante la creazione della consumazione: {response.status_code}")
         print(f"Risposta: {response_data}")
         return None
+
+    # 5. Aggiorna i dati di gioco
+    game_data = get_game_data(user_id)
+    if game_data:
+        # Aggiorna Time Keeper Progress
+        update_achievement_progress(game_data, 'Time Keeper')
+        
+        # Se il tasso è legale, aggiorna Safe Driver Progress e Daily Challenge
+        if esito_calcolo == 'Negativo':
+            update_achievement_progress(game_data, 'Safe Driver')
+            
+            # Aggiorna Daily Challenge
+            current_daily = game_data['fields']['Daily Challenge Completed']
+            if current_daily < 3:  # Massimo 3 sessioni al giorno
+                updates = {
+                    'Daily Challenge Completed': current_daily + 1
+                }
+                if current_daily + 1 == 3:  # Se completa la daily challenge
+                    updates['Points'] = game_data['fields']['Points'] + 50  # Bonus punti
+                update_game_data(game_data['id'], updates)
+        
+        # Aggiorna Mix Master Progress (solo se è un drink nuovo)
+        user_consumazioni = get_user_consumazioni(user_id)
+        drink_ids = set()
+        for cons in user_consumazioni:
+            if 'Drink' in cons['fields']:
+                drink_ids.add(cons['fields']['Drink'][0])
+        
+        if drink_id not in drink_ids:
+            update_achievement_progress(game_data, 'Mix Master')
+        
+        # Assegna punti base per la sessione
+        award_points(game_data, 10, 5)  # 10 punti e 5 XP per ogni sessione
         
     return response_data['records'][0]
 
@@ -362,10 +386,7 @@ def simula():
     bar_id = session['bar_id']
     drinks = get_drinks(bar_id)
     
-    consumazione_creata = None
-    tasso_visualizzato = None
-    esito_visualizzato = None
-    livello_messaggio = None
+    consumazione_creata = None # Manteniamo solo la variabile per l'ID della consumazione
     drink_selezionato_obj = None
 
     # === GESTIONE DATO DA ARDUINO (TEMPORANEAMENTE FISSO PER TEST) ===
@@ -402,20 +423,9 @@ def simula():
             )
 
             if consumazione_creata and 'fields' in consumazione_creata:
-                tasso_visualizzato = consumazione_creata['fields'].get("Tasso Calcolato (g/L)")
-                esito_visualizzato = consumazione_creata['fields'].get("Risultato")
+                # Salva l'ID della consumazione nella sessione
+                session['active_consumazione_id'] = consumazione_creata['id']
                 
-                # Ottieni anche il messaggio di livello per la visualizzazione
-                if tasso_visualizzato is not None:
-                    try:
-                        # Assicurati che tasso_visualizzato sia un float per la funzione dell'algoritmo
-                        tasso_float = float(tasso_visualizzato)
-                        interpretazione_dettagliata = interpreta_tasso_alcolemico(tasso_float)
-                        if interpretazione_dettagliata and 'livello' in interpretazione_dettagliata:
-                            livello_messaggio = interpretazione_dettagliata['livello']
-                    except ValueError:
-                        livello_messaggio = "N/A (tasso non numerico)"
-                        
                 flash('Simulazione registrata con successo!', 'success')
                 
                 # Resetta dato_da_arduino dopo l'uso
@@ -435,10 +445,7 @@ def simula():
     return render_template('simula.html', 
                          bar=bar_details,
                          drinks=drinks,
-                         tasso=tasso_visualizzato,
                          drink_selezionato=drink_selezionato_obj,
-                         esito=esito_visualizzato,
-                         livello=livello_messaggio,
                          valore_peso_utilizzato=current_peso_cocktail_g,
                          usando_peso_fisso_test=usando_peso_fisso_test,
                          consumazione_id=consumazione_creata['id'] if consumazione_creata else None)
@@ -752,27 +759,73 @@ def sorsi(consumazione_id):
         flash('Non hai i permessi per accedere a questa consumazione', 'danger')
         return redirect(url_for('simula'))
     
+    # Assicurati che il bar_id sia nella sessione (utile per la navbar e intestazione)
+    consumazione_bar_id = consumazione['fields'].get('Bar', [None])[0]
+    if consumazione_bar_id and session.get('bar_id') != consumazione_bar_id:
+        session['bar_id'] = consumazione_bar_id
+
     # Recupera i sorsi già registrati
     sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
-    
+    print("\nDEBUG - Sorsi registrati:", len(sorsi_registrati))
+    for sorso in sorsi_registrati:
+        print("DEBUG - Sorso:", sorso['fields'])
+
+    interpretazione_bac = None
+    bac_ultimo_sorso = None
+    if sorsi_registrati:
+        # Prendi il BAC dell'ultimo sorso registrato
+        ultimo_sorso = sorsi_registrati[0]
+        print("\nDEBUG - Ultimo sorso:", ultimo_sorso['fields'])
+        bac_ultimo_sorso = ultimo_sorso['fields'].get('BAC Temporaneo')
+        print("DEBUG - BAC ultimo sorso:", bac_ultimo_sorso)
+        if bac_ultimo_sorso is not None:
+            try:
+                bac_float = float(bac_ultimo_sorso)
+                print("DEBUG - BAC convertito in float:", bac_float)
+                interpretazione_bac = interpreta_tasso_alcolemico(bac_float)
+                print("DEBUG - Interpretazione BAC:", interpretazione_bac)
+            except Exception as e:
+                print("DEBUG - Errore interpretazione BAC:", str(e))
+                interpretazione_bac = None
+    else:
+        print("\nDEBUG - Nessun sorso registrato")
+
     if request.method == 'POST':
         volume = float(request.form.get('volume', 50))
         if volume > 0 and volume <= consumazione['fields']['Peso (g)']:
             # Registra il nuovo sorso
             nuovo_sorso = registra_sorso(consumazione_id, volume)
+            print("\nDEBUG - Nuovo sorso registrato:", nuovo_sorso['fields'] if nuovo_sorso else None)
             if nuovo_sorso:
-                flash('Sorso registrato con successo', 'success')
+                # Aggiungo il flash con il BAC cumulativo e la sua interpretazione
+                bac_cumulativo = nuovo_sorso['fields'].get('BAC Temporaneo')
+                if bac_cumulativo is not None:
+                    try:
+                        bac_float = float(bac_cumulativo)
+                        interpretazione = interpreta_tasso_alcolemico(bac_float)
+                        flash(f'BAC cumulativo attuale: {bac_cumulativo} g/L\nStato: {interpretazione["livello"]}', 'info')
+                    except Exception as e:
+                        print("DEBUG - Errore interpretazione BAC:", str(e))
+                        flash(f'BAC cumulativo attuale: {bac_cumulativo} g/L', 'info')
                 return redirect(url_for('sorsi', consumazione_id=consumazione_id))
             else:
                 flash('Errore durante la registrazione del sorso', 'danger')
         else:
             flash('Volume non valido', 'danger')
-    
+
+    # DEBUG: Controlla i valori prima di renderizzare il template
+    print("\nDEBUG - PRIMA DI RENDERIZZARE TEMPLATE:")
+    print("DEBUG - sorsi_registrati:", sorsi_registrati)
+    print("DEBUG - bac_ultimo_sorso:", bac_ultimo_sorso)
+    print("DEBUG - interpretazione_bac:", interpretazione_bac)
+
     return render_template('sorsi.html',
                          email=session['user_email'],
                          consumazione_id=consumazione_id,
                          volume_iniziale=consumazione['fields']['Peso (g)'],
-                         sorsi_registrati=sorsi_registrati)
+                         sorsi_registrati=sorsi_registrati,
+                         interpretazione_bac=interpretazione_bac,
+                         bac_ultimo_sorso=bac_ultimo_sorso)
 
 def get_consumazione_by_id(consumazione_id):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni/{consumazione_id}'
@@ -934,6 +987,242 @@ def registra_sorso(consumazione_id, volume):
     except Exception as e:
         print(f"Errore durante la registrazione del sorso: {str(e)}")
         return None
+
+def get_game_data(user_id):
+    """Recupera i dati di gioco dell'utente da Airtable"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
+    params = {
+        'filterByFormula': f"{{User}}='{user_id}'"
+    }
+    response = requests.get(url, headers=get_airtable_headers(), params=params)
+    if response.status_code == 200:
+        records = response.json().get('records', [])
+        return records[0] if records else None
+    return None
+
+def create_game_data(user_id):
+    """Crea un nuovo record di dati di gioco per l'utente basato sulla sua storia"""
+    # Recupera tutte le consumazioni dell'utente
+    consumazioni = get_user_consumazioni(user_id)
     
+    # Inizializza i contatori
+    safe_driver_progress = 0
+    mix_master_progress = 0
+    time_keeper_progress = len(consumazioni)
+    
+    # Set di drink unici provati
+    drink_ids = set()
+    
+    # Analizza ogni consumazione
+    for cons in consumazioni:
+        fields = cons.get('fields', {})
+        
+        # Conta sessioni sicure (tasso legale)
+        if fields.get('Risultato') == 'Negativo':
+            safe_driver_progress += 1
+        
+        # Conta drink unici
+        if 'Drink' in fields and fields['Drink']:
+            drink_ids.add(fields['Drink'][0])
+    
+    mix_master_progress = len(drink_ids)
+    
+    # Calcola punti e XP iniziali
+    # 10 punti per ogni sessione sicura
+    # 5 punti per ogni drink unico
+    # 1 punto per ogni sessione tracciata
+    initial_points = (safe_driver_progress * 10) + (mix_master_progress * 5) + time_keeper_progress
+    initial_xp = initial_points % 100  # XP va da 0 a 100
+    initial_level = 1 + (initial_points // 100)  # Ogni 100 punti = 1 livello
+    
+    # Crea il record in Airtable
+    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
+    data = {
+        'records': [{
+            'fields': {
+                'User': [user_id],
+                'Level': initial_level,
+                'Points': initial_points,
+                'XP': initial_xp,
+                'Safe Driver Progress': safe_driver_progress,
+                'Mix Master Progress': mix_master_progress,
+                'Time Keeper Progress': time_keeper_progress,
+                'Daily Challenge Completed': 0,  # Daily challenge inizia da 0
+                'Last Daily Reset': datetime.now(TIMEZONE).isoformat(),
+                'Last Updated': datetime.now(TIMEZONE).isoformat()
+            }
+        }]
+    }
+    response = requests.post(url, headers=get_airtable_headers(), json=data)
+    if response.status_code == 200:
+        return response.json()['records'][0]
+    return None
+
+def update_game_data(game_data_id, updates):
+    """Aggiorna i dati di gioco dell'utente"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData/{game_data_id}'
+    data = {
+        'fields': {
+            **updates,
+            'Last Updated': datetime.now(TIMEZONE).isoformat()
+        }
+    }
+    response = requests.patch(url, headers=get_airtable_headers(), json=data)
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def check_and_reset_daily_challenge(game_data):
+    """Controlla e resetta la daily challenge se necessario"""
+    last_reset = datetime.fromisoformat(game_data['fields']['Last Daily Reset'].replace('Z', '+00:00'))
+    last_reset = last_reset.astimezone(TIMEZONE)
+    now = datetime.now(TIMEZONE)
+    
+    # Se è passato un giorno dall'ultimo reset
+    if (now - last_reset).days >= 1:
+        updates = {
+            'Daily Challenge Completed': 0,
+            'Last Daily Reset': now.isoformat()
+        }
+        update_game_data(game_data['id'], updates)
+        return True
+    return False
+
+def calculate_level(xp):
+    """Calcola il livello basato sull'XP"""
+    # Formula: livello = 1 + (XP / 100)
+    return 1 + (xp // 100)
+
+def award_points(game_data, points, xp):
+    """Assegna punti e XP al giocatore"""
+    current_points = game_data['fields']['Points']
+    current_xp = game_data['fields']['XP']
+    current_level = game_data['fields']['Level']
+    
+    new_points = current_points + points
+    new_xp = (current_xp + xp) % 100  # Mantiene XP tra 0 e 100
+    new_level = calculate_level(current_xp + xp)
+    
+    updates = {
+        'Points': new_points,
+        'XP': new_xp,
+        'Level': new_level
+    }
+    
+    return update_game_data(game_data['id'], updates)
+
+def update_achievement_progress(game_data, achievement_type, progress=1):
+    """Aggiorna il progresso di un achievement"""
+    field_name = f'{achievement_type} Progress'
+    current_progress = game_data['fields'][field_name]
+    new_progress = current_progress + progress
+    
+    updates = {field_name: new_progress}
+    
+    # Controlla se l'achievement è stato completato
+    if achievement_type == 'Safe Driver' and new_progress >= 5:
+        updates['Achievements Unlocked'] = ['Safe Driver']
+    elif achievement_type == 'Mix Master' and new_progress >= 10:
+        updates['Achievements Unlocked'] = ['Mix Master']
+    elif achievement_type == 'Time Keeper' and new_progress >= 20:
+        updates['Achievements Unlocked'] = ['Time Keeper']
+    
+    return update_game_data(game_data['id'], updates)
+
+@app.route('/game')
+def game():
+    if not session.get('user'):
+        flash('Devi effettuare il login per accedere al gioco.')
+        return redirect(url_for('login'))
+    
+    # Get user data
+    user = get_user_by_id(session.get('user'))
+    
+    # Get or create game data
+    game_data = get_game_data(session.get('user'))
+    if not game_data:
+        game_data = create_game_data(session.get('user'))
+        if not game_data:
+            flash('Errore durante la creazione dei dati di gioco.')
+            return redirect(url_for('home'))
+    
+    # Check and reset daily challenge if needed
+    check_and_reset_daily_challenge(game_data)
+    
+    # Get all game data for leaderboard
+    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
+    response = requests.get(url, headers=get_airtable_headers())
+    all_game_data = response.json().get('records', [])
+    
+    # Process leaderboard data - keep only latest entry per user
+    user_latest_data = {}
+    for data in all_game_data:
+        fields = data['fields']
+        user_id = fields.get('User', [''])[0]
+        if user_id:
+            # Get timestamp of this entry
+            last_updated = fields.get('Last Updated')
+            if not last_updated:
+                continue
+                
+            # If we haven't seen this user before or this is a newer entry
+            if user_id not in user_latest_data or last_updated > user_latest_data[user_id]['timestamp']:
+                user_data = get_user_by_id(user_id)
+                if user_data and 'fields' in user_data:
+                    # Calculate completed achievements
+                    achievements_completed = 0
+                    if fields.get('Safe Driver Progress', 0) >= 5:
+                        achievements_completed += 1
+                    if fields.get('Mix Master Progress', 0) >= 10:
+                        achievements_completed += 1
+                    if fields.get('Time Keeper Progress', 0) >= 20:
+                        achievements_completed += 1
+                    
+                    user_latest_data[user_id] = {
+                        'email': user_data['fields'].get('Email', 'Unknown'),
+                        'level': fields.get('Level', 1),
+                        'points': fields.get('Points', 0),
+                        'achievements_completed': achievements_completed,
+                        'total_achievements': 3,  # Total number of achievements
+                        'timestamp': last_updated,
+                        'is_current_user': user_id == session.get('user')  # Flag per l'utente corrente
+                    }
+    
+    # Convert to list and sort by points
+    leaderboard = list(user_latest_data.values())
+    leaderboard.sort(key=lambda x: x['points'], reverse=True)
+    # Take only top 10
+    leaderboard = leaderboard[:10]
+    
+    # Prepare game data for template
+    template_game_data = {
+        'level': game_data['fields']['Level'],
+        'points': game_data['fields']['Points'],
+        'xp': game_data['fields']['XP'],
+        'achievements': {
+            'safe_driver': {
+                'progress': game_data['fields']['Safe Driver Progress'],
+                'total': 5
+            },
+            'mix_master': {
+                'progress': game_data['fields']['Mix Master Progress'],
+                'total': 10
+            },
+            'time_keeper': {
+                'progress': game_data['fields']['Time Keeper Progress'],
+                'total': 20
+            }
+        },
+        'daily_challenge': {
+            'completed_sessions': game_data['fields']['Daily Challenge Completed'],
+            'total_sessions': 3
+        }
+    }
+    
+    return render_template('game.html', 
+                         user=user, 
+                         game_data=template_game_data,
+                         leaderboard=leaderboard)
+
 if __name__ == '__main__':
     app.run(debug=True)
