@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Registra Sorsi{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Rimosso l'animazione bounce */
+    .smiley-icon {
+        font-size: 2em;
+        margin-right: 10px;
+    }
+    /* Aggiunta di stili Bootstrap-like per affinamento */
+    .form-label i {
+        color: #0d6efd; /* Bootstrap primary blue */
+    }
+    .alert i.fas {
+        margin-right: .5rem;
+    }
+    .table thead th i.fas {
+        color: #f8f9fa; /* Bootstrap light for dark header */
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+    <div class="container mt-4">
+        <h2 class="mb-4 text-center text-primary"><i class="fas fa-glass-martini-alt me-2"></i> Registra Sorsi</h2>
+
+        <form method="POST" class="mb-4 p-3 border rounded bg-light">
+            <div class="mb-3">
+                <label for="volume" class="form-label"><i class="fas fa-tint me-2"></i> Volume del sorso (g):</label>
+                <input type="number" class="form-control form-control-lg" id="volume" name="volume" min="1" max="{{ volume_iniziale }}" value="50" required>
+                <small class="form-text text-muted"><i class="fas fa-info-circle me-1"></i> Volume massimo disponibile: {{ volume_iniziale }}g</small>
+            </div>
+            <div class="d-grid">
+                <button type="submit" class="btn btn-primary btn-lg"><i class="fas fa-plus-circle me-2"></i> Registra Sorso</button>
+            </div>
+        </form>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {% if category == 'success' %}alert-success{% elif category == 'info' %}alert-info{% else %}alert-danger{% endif %} alert-dismissible fade show mb-4" role="alert">
+                        <div class="d-flex align-items-center">
+                            {% if category == 'success' %}
+                                <span class="smiley-icon">😊</span> {# Success Smiley #}
+                            {% elif category == 'info' %}
+                                 <span class="smiley-icon">🤔</span> {# Info/Thinking Smiley #}
+                            {% else %}
+                                 <span class="smiley-icon">😟</span> {# Danger/Worried Smiley #}
+                            {% endif %}
+                            <div>
+                                 {{ message }}
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% if sorsi_registrati %}
+        <h3 class="mt-5 mb-3 text-secondary"><i class="fas fa-history me-2"></i> Sorsi Registrati</h3>
+        <div class="table-responsive rounded shadow-sm">
+            <table class="table table-striped table-hover table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th><i class="fas fa-tint me-2"></i>Volume (g)</th>
+                        <th><i class="fas fa-chart-line me-2"></i>BAC</th>
+                        <th><i class="fas fa-clock me-2"></i>Ora</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sorso in sorsi_registrati %}
+                    <tr>
+                        <td>{{ sorso.fields['Volume (g)'] }}</td>
+                        <td>{{ sorso.fields['BAC Temporaneo'] }}</td>
+                        <td>{{ sorso.fields['Ora inizio'] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+{% endblock %}

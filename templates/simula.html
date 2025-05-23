@@ -3,37 +3,46 @@
 {% block title %}SAFESIP - Simulazione{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card shadow-sm">
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow-lg">
             <div class="card-body">
-                <h2 class="card-title text-center mb-4">Simulazione Tasso Alcolemico</h2>
+                <h2 class="card-title text-center mb-4"><i class="bi bi-calculator me-2"></i> Simulazione Tasso Alcolemico</h2>
                 {% if bar and bar.fields %}
-                    <h3 class="h5 mb-3">Bar: {{ bar.fields.Name }}</h3>
+                    <h3 class="h5 mb-3 text-muted"><i class="bi bi-shop me-2"></i>Bar: {{ bar.fields.Name }}</h3>
                 {% else %}
-                    <h3 class="h5 mb-3">Bar non specificato</h3>
+                    <h3 class="h5 mb-3 text-muted"><i class="bi bi-shop me-2"></i>Bar non specificato</h3>
                 {% endif %}
 
                 {% if usando_peso_fisso_test %}
-                    <div class="alert alert-warning">
-                        <strong>Modalità Test:</strong> Si sta utilizzando un peso fisso di <strong>{{ valore_peso_utilizzato }} g</strong> per il cocktail.
-                        <br><small>Per utilizzare il peso reale da Arduino, modificare la configurazione dell'app.</small>
+                    <div class="alert alert-warning d-flex align-items-center" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <div>
+                            <strong>Modalità Test:</strong> Si sta utilizzando un peso fisso di <strong>{{ valore_peso_utilizzato }} g</strong> per il cocktail.
+                            <br><small>Per utilizzare il peso reale da Arduino, modificare la configurazione dell'app.</small>
+                        </div>
                     </div>
                 {% elif valore_peso_utilizzato is not none %}
-                    <div class="alert alert-info">
-                        Peso del cocktail misurato da Arduino: <strong>{{ valore_peso_utilizzato }} g</strong>.
-                        <br><small>Questo valore sarà utilizzato per la simulazione.</small>
+                    <div class="alert alert-info d-flex align-items-center" role="alert">
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        <div>
+                            Peso del cocktail misurato da Arduino: <strong>{{ valore_peso_utilizzato }} g</strong>.
+                            <br><small>Questo valore sarà utilizzato per la simulazione.</small>
+                        </div>
                     </div>
                 {% else %}
-                    <div class="alert alert-danger">
-                        <strong>Errore:</strong> Peso del cocktail non disponibile.
+                    <div class="alert alert-danger d-flex align-items-center" role="alert">
+                        <i class="bi bi-x-octagon-fill me-2"></i>
+                        <div>
+                            <strong>Errore:</strong> Peso del cocktail non disponibile.
+                        </div>
                     </div>
                 {% endif %}
 
                 <form method="post" action="{{ url_for('simula') }}">
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="drink" class="form-label">Seleziona Drink</label>
+                            <label for="drink" class="form-label"><i class="bi bi-cup-straw me-2"></i>Seleziona Drink</label>
                             <select class="form-select" id="drink" name="drink" required>
                                 <option value="" disabled selected>Scegli un drink...</option>
                                 {% for drink_item in drinks %}
@@ -42,7 +51,7 @@
                             </select>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="stomaco" class="form-label">Stato stomaco</label>
+                            <label for="stomaco" class="form-label"><i class="bi bi-journal-medical me-2"></i>Stato stomaco</label>
                             <select class="form-select" id="stomaco" name="stomaco" required>
                                 <option value="pieno" {% if request.form.stomaco == 'pieno' %}selected{% endif %}>Pieno</option>
                                 <option value="vuoto" {% if request.form.stomaco == 'vuoto' %}selected{% endif %}>Vuoto</option>
@@ -50,55 +59,17 @@
                         </div>
                     </div>
                     
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary">Calcola e Registra Consumazione</button>
+                    <div class="d-grid mt-3">
+                        <button type="submit" class="btn btn-primary btn-lg"><i class="bi bi-play-circle me-2"></i> Calcola e Registra Consumazione</button>
                     </div>
                 </form>
 
-                {% if tasso is not none and esito is not none %}
-                    {% if esito == 'Positivo' %}
-                        <div class="alert alert-success mt-4">
-                            <div class="d-flex align-items-center">
-                                <i class="bi bi-emoji-smile fs-1 me-3"></i>
-                                <div>
-                                    <h4 class="alert-heading">Ottimo! Puoi guidare in sicurezza</h4>
-                                    <p class="mb-0">
-                                        {% if drink_selezionato and drink_selezionato.fields %}
-                                            Drink: {{ drink_selezionato.fields.Name }}<br>
-                                        {% endif %}
-                                        Tasso alcolemico stimato: <strong>{{ tasso }} g/L</strong><br>
-                                        {% if livello %}
-                                            Interpretazione: <em>{{ livello }}</em><br>
-                                        {% endif %}
-                                        <small class="text-muted">Il tuo tasso alcolemico è inferiore al limite legale di 0.5 g/L</small>
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    {% else %}
-                        <div class="alert alert-danger mt-4">
-                            <div class="d-flex align-items-center">
-                                <i class="bi bi-emoji-frown fs-1 me-3"></i>
-                                <div>
-                                    <h4 class="alert-heading">Attenzione! Non guidare</h4>
-                                    <p class="mb-0">
-                                        {% if drink_selezionato and drink_selezionato.fields %}
-                                            Drink: {{ drink_selezionato.fields.Name }}<br>
-                                        {% endif %}
-                                        Tasso alcolemico stimato: <strong>{{ tasso }} g/L</strong><br>
-                                        {% if livello %}
-                                            Interpretazione: <em>{{ livello }}</em><br>
-                                        {% endif %}
-                                        <small class="text-muted">Il tuo tasso alcolemico supera il limite legale di 0.5 g/L</small>
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    {% endif %}
-                {% elif request.method == 'POST' and (tasso is none or esito is none) %}
-                    <div class="alert alert-warning mt-4">
-                        Non è stato possibile calcolare il tasso alcolemico. Verifica i dati inseriti o che il peso da Arduino sia disponibile.
-                    </div>
+                {% if consumazione_id %}
+                <div class="d-grid gap-2 mt-4">
+                    <a href="{{ url_for('sorsi', consumazione_id=consumazione_id) }}" class="btn btn-outline-primary btn-lg">
+                        <i class="bi bi-cup-hot me-2"></i> Registra Sorsi Dettagliato
+                    </a>
+                </div>
                 {% endif %}
             </div>
         </div>

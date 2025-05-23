@@ -3,15 +3,15 @@
 {% block title %}SAFESIP - Seleziona Bar{% endblock %}
 
 {% block content %}
-    <div class="container">
-        <h2 class="text-center mb-4">Seleziona il Bar</h2>
+    <div class="container mt-4">
+        <h2 class="text-center mb-4"><i class="bi bi-shop me-2"></i> Seleziona il Bar</h2>
         
         <div class="row justify-content-center">
-            <div class="col-md-6">
+            <div class="col-md-8 col-lg-6">
                 <form method="POST" id="barForm">
-                    <div class="form-group mb-4">
-                        <label for="citta">Città:</label>
-                        <select class="form-control" id="citta" name="citta" onchange="this.form.submit()">
+                    <div class="mb-3">
+                        <label for="citta" class="form-label"><i class="bi bi-building me-2"></i>Città:</label>
+                        <select class="form-select" id="citta" name="citta" onchange="this.form.submit()">
                             <option value="">Seleziona una città</option>
                             {% for citta in citta_list %}
                                 <option value="{{ citta }}" {% if citta == citta_selezionata %}selected{% endif %}>{{ citta }}</option>
@@ -21,16 +21,17 @@
                 </form>
 
                 {% if citta_selezionata %}
-                    <div class="form-group mb-4">
-                        <label for="bar">Bar disponibili a {{ citta_selezionata }}:</label>
-                        <div class="list-group">
-                            {% for bar in bar_list %}
-                                <a href="{{ url_for('seleziona_bar', bar=bar.id) }}" class="list-group-item list-group-item-action">
-                                    <h5 class="mb-1">{{ bar.fields.Name }}</h5>
-                                    <p class="mb-1">{{ bar.fields.Indirizzo }}</p>
-                                </a>
-                            {% endfor %}
-                        </div>
+                    <h3 class="h5 mb-3"><i class="bi bi-list-ul me-2"></i>Bar disponibili a {{ citta_selezionata }}:</h3>
+                    <div class="list-group">
+                        {% for bar in bar_list %}
+                            <a href="{{ url_for('seleziona_bar', bar=bar.id) }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="mb-1"><i class="bi bi-shop me-2"></i>{{ bar.fields.Name }}</h5>
+                                    <p class="mb-1 text-muted"><i class="bi bi-geo-alt me-2"></i>{{ bar.fields.Indirizzo }}</p>
+                                </div>
+                                <i class="bi bi-chevron-right"></i>
+                            </a>
+                        {% endfor %}
                     </div>
                 {% endif %}
             </div>
