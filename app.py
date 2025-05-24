@@ -68,10 +68,34 @@ def get_airtable_headers():
         'Content-Type': 'application/json'
     }
 
-def get_bars():
+def get_bars(city=None):
+    logger.info(f"Richiesta get_bars con parametro city: {city}")
     url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
     response = requests.get(url, headers=get_airtable_headers())
-    return response.json()['records']
+    bars = response.json()['records']
+    logger.info(f"Recuperati {len(bars)} bar totali da Airtable")
+    
+    if city:
+        # Filtra i bar per città
+        logger.info(f"Filtraggio bar per città: {city}")
+        # Log delle città disponibili per debug
+        available_cities = set(bar['fields'].get('Città', '') for bar in bars if 'Città' in bar['fields'])
+        logger.info(f"Città disponibili nei dati: {available_cities}")
+        
+        filtered_bars = [bar for bar in bars if bar['fields'].get('Città') == city]
+        logger.info(f"Bar filtrati per {city}: {len(filtered_bars)}")
+        return filtered_bars
+    return bars
+
+def get_cities():
+    """Ottiene l'elenco delle città dai bar disponibili"""
+    bars = get_bars()
+    # Estrai tutte le città uniche
+    cities = set(bar['fields'].get('Città', '') for bar in bars if 'Città' in bar['fields'])
+    # Rimuovi città vuote
+    cities = [city for city in cities if city]
+    # Ordina le città
+    return sorted(cities)
 
 def get_drinks(bar_id=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
@@ -1188,32 +1212,48 @@ def registra_sorso_ajax(consumazione_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# Funzione di utilità interna per verificare la consumazione attiva
+def get_active_consumption():
+    """Verifica se c'è una consumazione attiva per l'utente corrente e la restituisce"""
+    if 'user' not in session:
+        return None
+    
+    try:
+        # Ottieni tutte le consumazioni dell'utente
+        user_id = session.get('user')
+        if not user_id:
+            return None
+            
+        consumazioni = get_consumazioni_by_user(user_id)
+        
+        # Trova l'ultima consumazione non completata
+        for consumazione in consumazioni:
+            if consumazione['fields'].get('Completato', '') == 'Non completato':
+                return consumazione
+        
+        return None
+    
+    except Exception as e:
+        print(f"Errore nel recupero della consumazione attiva: {e}")
+        return None
+
 @app.route('/check_active_consumption')
 def check_active_consumption():
-    """Verifica se c'è una consumazione attiva per l'utente corrente"""
+    """API per verificare se c'è una consumazione attiva per l'utente corrente"""
     if 'user' not in session:
         return jsonify({'active': False, 'error': 'Utente non autenticato'})
     
     try:
-        # Ottieni tutte le consumazioni dell'utente
-        user_id = session['user']['id']
-        consumazioni = get_consumazioni_by_user(user_id)
-        
-        # Trova l'ultima consumazione non completata
-        active_consumption = None
-        for consumazione in consumazioni:
-            if consumazione['fields'].get('Completato', '') == 'Non completato':
-                active_consumption = consumazione
-                break
+        active_consumption = get_active_consumption()
         
         if active_consumption:
             # Calcola i dettagli della consumazione
-            drink_id = active_consumption['fields'].get('Drink ID', [])[0] if 'Drink ID' in active_consumption['fields'] else None
+            drink_id = active_consumption['fields'].get('Drink', [])[0] if 'Drink' in active_consumption['fields'] else None
             drink_name = "Drink sconosciuto"
             if drink_id:
                 drink = get_drink_by_id(drink_id)
                 if drink:
-                    drink_name = drink['fields'].get('Nome', 'Drink sconosciuto')
+                    drink_name = drink['fields'].get('Name', 'Drink sconosciuto')
             
             # Calcola il peso consumato
             initial_weight = float(active_consumption['fields'].get('Peso (g)', 0))
@@ -1222,7 +1262,7 @@ def check_active_consumption():
             consumed_percentage = round((consumed_weight / initial_weight) * 100) if initial_weight > 0 else 0
             
             # Calcola il BAC stimato
-            bac = float(active_consumption['fields'].get('BAC Stimato', 0))
+            bac = float(active_consumption['fields'].get('Tasso Calcolato (g/L)', 0))
             
             return jsonify({
                 'active': True,
@@ -1292,48 +1332,93 @@ def finish_consumption():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/get_cities', methods=['GET'])
+def api_get_cities():
+    """Endpoint API per ottenere l'elenco delle città disponibili"""
+    if 'user' not in session:
+        return jsonify({'error': 'Non autorizzato'}), 401
+        
+    cities = get_cities()
+    return jsonify({'cities': cities})
+
+@app.route('/get_bars_by_city/<city>', methods=['GET'])
+def get_bars_by_city(city):
+    """Endpoint API per ottenere i bar in una specifica città"""
+    logger.info(f"Richiesta bar per città: {city}")
+    
+    if 'user' not in session:
+        logger.warning("Tentativo di accesso non autorizzato all'endpoint get_bars_by_city")
+        return jsonify({'error': 'Non autorizzato'}), 401
+        
+    bars = get_bars(city)
+    logger.info(f"Trovati {len(bars)} bar per la città {city}")
+    
+    formatted_bars = [{
+        'id': bar['id'],
+        'name': bar['fields'].get('Name', '')
+    } for bar in bars]
+    
+    response = {'bars': formatted_bars}
+    logger.info(f"Risposta: {response}")
+    return jsonify(response)
+
 @app.route('/nuovo_drink')
 def nuovo_drink():
-    """Pagina unificata per inizializzare e monitorare un nuovo drink"""
+    # Pagina unificata per inizializzare e monitorare un nuovo drink
     if 'user' not in session:
-        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
+        flash('Devi effettuare il login per monitorare i tuoi drink')
         return redirect(url_for('login'))
     
-    # Verifica che sia stato selezionato un bar
-    if 'bar_id' not in session:
-        flash('Devi prima selezionare un bar', 'warning')
-        return redirect(url_for('bars'))
+    # Ottieni l'elenco delle città disponibili
+    cities = get_cities()
     
-    # Recupera il bar_id dalla sessione
-    bar_id = session['bar_id']
+    # Controlla se c'è già una consumazione attiva
+    consumazione_attiva = get_active_consumption()
     
-    # Recupera solo i drink disponibili in quel bar
-    drinks = get_drinks(bar_id)
-    
-    # Verifica se l'utente ha già una consumazione attiva
-    user_id = session['user']  # user_id è direttamente in session['user']
-    consumazioni = get_consumazioni_by_user(user_id)
-    consumazione_attiva = None
-    
-    for consumazione in consumazioni:
-        if consumazione['fields'].get('Completato', '') == 'Non completato':
-            consumazione_attiva = consumazione
-            break
-    
-    # Se c'è una consumazione attiva, mostra i dettagli della consumazione in corso
-    # invece di reindirizzare, così l'utente può continuare a monitorarla
+    # Se c'è una consumazione attiva, recupera i dettagli del drink
     if consumazione_attiva:
-        # Recupera i dettagli del drink
         drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
-        drink = get_drink_by_id(drink_id) if drink_id else None
-        
-        # Passa i dettagli della consumazione attiva al template
-        return render_template('nuovo_drink.html', 
-                              drinks=drinks, 
-                              consumazione_attiva=consumazione_attiva,
-                              drink_attivo=drink)
+        drink_attivo = get_drink_by_id(drink_id) if drink_id else None
+    else:
+        drink_attivo = None
     
-    return render_template('nuovo_drink.html', drinks=drinks)
+    return render_template(
+        'nuovo_drink.html',
+        consumazione_attiva=consumazione_attiva,
+        drink_attivo=drink_attivo,
+        cities=cities
+    )
+
+@app.route('/get_drinks_by_bar/<bar_id>', methods=['GET'])
+def get_drinks_by_bar(bar_id):
+    # Endpoint API per ottenere i drink disponibili per un bar specifico
+    if 'user' not in session:
+        return jsonify({'error': 'Non autorizzato'}), 401
+    
+    print(f"DEBUG: Ricevuta richiesta per drink del bar ID: {bar_id}")
+    
+    # Ottieni tutti i drink prima del filtraggio
+    all_drinks = get_drinks()
+    print(f"DEBUG: Trovati {len(all_drinks)} drink totali")
+    
+    # Filtra manualmente i drink per questo bar
+    bar_drinks = []
+    for drink in all_drinks:
+        bar_list = drink['fields'].get('Bar', [])
+        print(f"DEBUG: Drink {drink['id']} - Bar list: {bar_list}")
+        if bar_id in bar_list:
+            bar_drinks.append(drink)
+    
+    print(f"DEBUG: Filtrati {len(bar_drinks)} drink per il bar {bar_id}")
+    
+    # Formatta i dati per l'API
+    formatted_drinks = [{
+        'id': drink['id'],
+        'name': drink['fields'].get('Name', ''),
+        'gradazione': drink['fields'].get('Gradazione', 0)
+    } for drink in bar_drinks]
+    
+    return jsonify({'drinks': formatted_drinks})
 
 @app.route('/create_consumption', methods=['POST'])
 def create_consumption():
@@ -1345,12 +1430,16 @@ def create_consumption():
         data = request.get_json()
         peso_iniziale = float(data.get('peso_iniziale', 0))
         drink_id = data.get('drink_id')
+        bar_id = data.get('bar_id')  # Ottieni il bar_id direttamente dal form
         
         if peso_iniziale <= 0:
             return jsonify({'success': False, 'error': 'Peso iniziale non valido. Assicurati che il bicchiere sia posizionato sul sottobicchiere.'})
         
         if not drink_id:
             return jsonify({'success': False, 'error': 'Drink non selezionato'})
+            
+        if not bar_id:
+            return jsonify({'success': False, 'error': 'Bar non selezionato'})
         
         # Recupera i dati dell'utente e del drink
         user_id = session['user']  # user_id è direttamente in session['user']
@@ -1380,10 +1469,7 @@ def create_consumption():
             'Authorization': f'Bearer {AIRTABLE_API_KEY}',
             'Content-Type': 'application/json'
         }
-        # Ottieni il bar_id dalla sessione
-        bar_id = session.get('bar_id')
-        if not bar_id:
-            raise Exception('Bar non selezionato')
+        # Bar_id è già ottenuto dal form JSON
             
         # Prepara solo i dati essenziali, lasciando che Airtable gestisca i campi calcolati
         data = {

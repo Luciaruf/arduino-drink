@@ -155,12 +155,24 @@
                             
                             <form id="drink-form">
                                 <div class="mb-3">
-                                    <label for="drink-select" class="form-label">Drink</label>
-                                    <select class="form-select" id="drink-select" required>
-                                        <option value="" selected disabled>Seleziona un drink...</option>
-                                        {% for drink in drinks %}
-                                            <option value="{{ drink.id }}" data-alcol="{{ drink.fields.Gradazione }}">{{ drink.fields.Name }}</option>
+                                    <label for="city-select" class="form-label">In quale città ti trovi?</label>
+                                    <select class="form-select" id="city-select" required>
+                                        <option value="" selected disabled>Seleziona una città...</option>
+                                        {% for city in cities %}
+                                            <option value="{{ city }}">{{ city }}</option>
                                         {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="bar-select" class="form-label">In quale locale sei?</label>
+                                    <select class="form-select" id="bar-select" required disabled>
+                                        <option value="" selected disabled>Prima seleziona una città...</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="drink-select" class="form-label">Cosa vuoi bere?</label>
+                                    <select class="form-select" id="drink-select" required disabled>
+                                        <option value="" selected disabled>Prima seleziona un bar...</option>
                                     </select>
                                 </div>
                                 
@@ -301,10 +313,95 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // Variabili globali
+        let selectedCityName = null;
+        let selectedBarId = null;
         let selectedDrinkId = null;
         let selectedDrinkName = "";
         let percentualeAlcol = 0;
         let consumazioneId = null;
+        
+        // Elementi del DOM
+        const citySelect = document.getElementById('city-select');
+        const barSelect = document.getElementById('bar-select');
+        const drinkSelect = document.getElementById('drink-select');
+        
+        // Event listener per la selezione della città
+        if (citySelect) {
+            console.log('Elemento citySelect trovato:', citySelect);
+            citySelect.addEventListener('change', function() {
+                console.log('Evento change sulla città rilevato. Valore selezionato:', this.value);
+                selectedCityName = this.value;
+                
+                // Resetta la selezione del bar e del drink
+                barSelect.disabled = false;
+                barSelect.innerHTML = '<option value="" selected disabled>Caricamento bar...</option>';
+                
+                drinkSelect.disabled = true;
+                drinkSelect.innerHTML = '<option value="" selected disabled>Prima seleziona un bar...</option>';
+                
+                // Carica i bar disponibili per questa città
+                console.log(`Invio richiesta per i bar della città: ${selectedCityName}`);
+                const encodedCity = encodeURIComponent(selectedCityName);
+                const url = `/get_bars_by_city/${encodedCity}`;
+                console.log(`URL chiamata: ${url}`);
+                
+                fetch(url)
+                    .then(response => {
+                        console.log('Risposta ricevuta:', response.status);
+                        if (!response.ok) {
+                            throw new Error(`Errore HTTP: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Dati ricevuti:', data);
+                        barSelect.innerHTML = '<option value="" selected disabled>Seleziona un bar...</option>';
+                        if (data.bars && Array.isArray(data.bars)) {
+                            console.log(`Ricevuti ${data.bars.length} bar`);
+                            data.bars.forEach(bar => {
+                                const option = document.createElement('option');
+                                option.value = bar.id;
+                                option.textContent = bar.name;
+                                barSelect.appendChild(option);
+                            });
+                        } else {
+                            console.error('Formato dati non valido:', data);
+                            barSelect.innerHTML = '<option value="" selected disabled>Formato dati non valido</option>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Errore nel caricamento dei bar:', error);
+                        barSelect.innerHTML = '<option value="" selected disabled>Errore nel caricamento</option>';
+                    });
+            });
+        }
+        
+        // Event listener per la selezione del bar
+        if (barSelect) {
+            barSelect.addEventListener('change', function() {
+                selectedBarId = this.value;
+                drinkSelect.disabled = false;
+                drinkSelect.innerHTML = '<option value="" selected disabled>Caricamento drinks...</option>';
+                
+                // Carica i drink disponibili per questo bar
+                fetch(`/get_drinks_by_bar/${selectedBarId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        drinkSelect.innerHTML = '<option value="" selected disabled>Seleziona un drink...</option>';
+                        data.drinks.forEach(drink => {
+                            const option = document.createElement('option');
+                            option.value = drink.id;
+                            option.setAttribute('data-alcol', drink.gradazione);
+                            option.textContent = drink.name;
+                            drinkSelect.appendChild(option);
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Errore nel caricamento dei drink:', error);
+                        drinkSelect.innerHTML = '<option value="" selected disabled>Errore nel caricamento</option>';
+                    });
+            });
+        }
         let pesoIniziale = 0;
         let volumeConsumato = 0;
         let ultimoPeso = null;
@@ -350,10 +447,33 @@
         const drinkForm = document.getElementById('drink-form');
         if (drinkForm) {
             drinkForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const drinkSelect = document.getElementById('drink-select');
-            if (drinkSelect.value) {
+                e.preventDefault();
+                
+                const citySelect = document.getElementById('city-select');
+                const barSelect = document.getElementById('bar-select');
+                const drinkSelect = document.getElementById('drink-select');
+                
+                // Verifica che sia stata selezionata una città
+                if (!citySelect.value) {
+                    updateStatusMessage('Seleziona una città prima di iniziare', 'danger');
+                    return;
+                }
+                
+                // Verifica che sia stato selezionato un bar
+                if (!barSelect.value) {
+                    updateStatusMessage('Seleziona un bar prima di iniziare', 'danger');
+                    return;
+                }
+                
+                // Verifica che sia stato selezionato un drink
+                if (!drinkSelect.value) {
+                    updateStatusMessage('Seleziona un drink prima di iniziare', 'danger');
+                    return;
+                }
+                
+                // Salva i valori selezionati
+                selectedCityName = citySelect.value;
+                selectedBarId = barSelect.value;
                 selectedDrinkId = drinkSelect.value;
                 const option = drinkSelect.options[drinkSelect.selectedIndex];
                 selectedDrinkName = option.text;
@@ -557,6 +677,7 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
+                    bar_id: selectedBarId,
                     drink_id: selectedDrinkId,
                     peso_iniziale: initialWeight 
                 })
