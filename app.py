@@ -1,39 +1,41 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from werkzeug.security import generate_password_hash, check_password_hash
-import hashlib, binascii, os
+import hashlib, os
 
-# Funzioni alternative per l'hashing delle password compatibili con tutti i server
-def generate_secure_password_hash(password):
-    """Genera un hash della password compatibile con tutti i server"""
-    # Usa pbkdf2 che è molto supportato
-    salt = hashlib.sha256(os.urandom(60)).hexdigest().encode('ascii')
-    pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000)
-    pwdhash = binascii.hexlify(pwdhash)
-    return (salt + pwdhash).decode('ascii')
+# Sistema semplice per l'hashing delle password compatibile con tutti i server
+def hash_password(password):
+    """Genera un hash della password usando PBKDF2 e SHA-256"""
+    # Genera un salt casuale di 16 byte
+    salt = os.urandom(16)
+    # Calcola l'hash usando PBKDF2 con SHA-256
+    hash_bytes = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    # Converti salt e hash in formato esadecimale e concatenali
+    return salt.hex() + hash_bytes.hex()
 
-def verify_secure_password_hash(stored_password, provided_password):
-    """Verifica un hash creato con generate_secure_password_hash"""
+def verify_password(stored_hash, provided_password):
+    """Verifica un hash creato con hash_password"""
     try:
-        # Prima prova con il metodo Werkzeug standard
-        return check_password_hash(stored_password, provided_password)
-    except ValueError:
-        try:
-            # Se fallisce, prova con il nostro metodo personalizzato
-            salt = stored_password[:64]
-            hash_salvato = stored_password[64:]
-            pwdhash = hashlib.pbkdf2_hmac('sha512', provided_password.encode('utf-8'), salt.encode('ascii'), 100000)
-            pwdhash_hex = binascii.hexlify(pwdhash).decode('ascii')
-            logger.info(f"[VERIFY_HASH] Salt estratto: {salt}")
-            logger.info(f"[VERIFY_HASH] Hash calcolato: {pwdhash_hex}")
-            logger.info(f"[VERIFY_HASH] Hash salvato: {hash_salvato}")
-            logger.info(f"[VERIFY_HASH] Lunghezza hash calcolato: {len(pwdhash_hex)} | Lunghezza hash salvato: {len(hash_salvato)}")
-            result = pwdhash_hex == hash_salvato
-            logger.info(f"[VERIFY_HASH] Risultato confronto: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"[VERIFY_HASH] Errore nella verifica custom: {e}")
-            # Se entrambi falliscono, ritorna False
-            return False
+        # Estrai il salt (primi 32 caratteri = 16 byte in hex)
+        salt_hex = stored_hash[:32]
+        salt = bytes.fromhex(salt_hex)
+        
+        # Estrai l'hash memorizzato (resto della stringa)
+        stored_digest = stored_hash[32:]
+        
+        # Calcola l'hash della password fornita usando lo stesso salt
+        hash_bytes = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt, 100000)
+        calculated_digest = hash_bytes.hex()
+        
+        # Log per debug
+        logger.info(f"[VERIFY] Salt estratto: {salt_hex}")
+        logger.info(f"[VERIFY] Hash memorizzato: {stored_digest}")
+        logger.info(f"[VERIFY] Hash calcolato: {calculated_digest}")
+        
+        # Confronta i due hash
+        return calculated_digest == stored_digest
+    except Exception as e:
+        logger.error(f"[VERIFY] Errore nella verifica: {e}")
+        return False
+        
 import os
 from datetime import datetime, timedelta
 import requests
@@ -382,26 +384,24 @@ def register():
             flash('Email già registrata.')
             return redirect(url_for('register'))
 
-        # Usa la nuova funzione di hashing compatibile con tutti i server
         try:
-            secure_hash = generate_secure_password_hash(password)
+            # Usa il nuovo sistema di hashing semplice
+            secure_hash = hash_password(password)
             logger.info(f"[REGISTER] Hash password generato con successo per email: {email}")
             logger.info(f"[REGISTER] Lunghezza hash generato: {len(secure_hash)} - Hash: {secure_hash}")
-        except Exception as e:
-            logger.error(f"[REGISTER] Errore nella generazione dell'hash per email: {email} - Errore: {e}")
-            flash('Errore interno nella registrazione. Contatta il supporto.')
-            return redirect(url_for('register'))
-        try:
+            
+            # Crea l'utente nel database
             create_user(email, secure_hash, peso_kg, genere)
             logger.info(f"[REGISTER] Utente creato con successo: {email}")
+            
+            flash('Registrazione avvenuta con successo! Effettua il login.')
+            return redirect(url_for('login'))
         except Exception as e:
-            logger.error(f"[REGISTER] Errore nella creazione utente per email: {email} - Errore: {e}")
+            logger.error(f"[REGISTER] Errore nella registrazione per email: {email} - Errore: {e}")
             flash('Errore interno nella registrazione. Contatta il supporto.')
             return redirect(url_for('register'))
-        flash('Registrazione avvenuta con successo! Effettua il login.')
-        return redirect(url_for('login'))
+            
     return render_template('register.html')
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -410,16 +410,17 @@ def login():
         logger.info(f"[LOGIN] Tentativo di login per email: {email}")
         user = get_user_by_email(email)
 
+        result = False
         if user:
             try:
-                result = verify_secure_password_hash(user['fields']['Password'], password)
+                # Verifica la password
+                result = verify_password(user['fields']['Password'], password)
                 logger.info(f"[LOGIN] Verifica hash per email {email}: {result}")
             except Exception as e:
                 logger.error(f"[LOGIN] Errore nella verifica dell'hash per email {email}: {e}")
                 result = False
         else:
             logger.warning(f"[LOGIN] Utente non trovato per email: {email}")
-            result = False
 
         if result:
             session['user'] = user['id']
