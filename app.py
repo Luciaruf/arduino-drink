@@ -109,16 +109,20 @@ def get_user_by_email(email):
     return user
 
 def create_user(email, password_hash, peso_kg, genere):
+    logger.info(f"[CREATE_USER] Lunghezza hash password da salvare: {len(password_hash)} per email: {email}")
+    logger.info(f"[CREATE_USER] Hash password da salvare: {password_hash}")
+    if len(password_hash) < 100:
+        logger.error(f"[CREATE_USER] ATTENZIONE: hash password troppo corto per email: {email} - Hash: {password_hash}")
     url = f'https://api.airtable.com/v0/{BASE_ID}/Users'
     data = {
-        'records': [{\
-            'fields': {\
-                'Email': email,\
-                'Password': password_hash,\
+        'records': [{
+            'fields': {
+                'Email': email,
+                'Password': password_hash,
                 'Peso': peso_kg,
                 'Genere': genere.capitalize()
-            }\
-        }]\
+            }
+        }]
     }
     response = requests.post(url, headers=get_airtable_headers(), json=data)
     response_json = response.json()
@@ -375,6 +379,7 @@ def register():
         try:
             secure_hash = generate_secure_password_hash(password)
             logger.info(f"[REGISTER] Hash password generato con successo per email: {email}")
+            logger.info(f"[REGISTER] Lunghezza hash generato: {len(secure_hash)} - Hash: {secure_hash}")
         except Exception as e:
             logger.error(f"[REGISTER] Errore nella generazione dell'hash per email: {email} - Errore: {e}")
             flash('Errore interno nella registrazione. Contatta il supporto.')
