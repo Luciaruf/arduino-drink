@@ -426,7 +426,8 @@ def login():
             session['user'] = user['id']
             session['user_email'] = email
             logger.info(f"[LOGIN] Login riuscito per email: {email}")
-            return redirect(url_for('dashboard'))
+            # Reindirizza alla home invece che alla dashboard per un caricamento più veloce
+            return redirect(url_for('home'))
         else:
             logger.warning(f"[LOGIN] Login fallito per email: {email}")
             flash('Credenziali errate')
