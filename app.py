@@ -338,6 +338,10 @@ def home():
     bars = get_bars()
     return render_template('home.html', bars=bars)
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -346,7 +350,10 @@ def register():
         peso_kg_str = request.form.get('peso_kg') # Recupera peso
         genere = request.form.get('genere')      # Recupera genere
 
+        logger.info(f"[REGISTER] Tentativo di registrazione per email: {email}")
+
         if not peso_kg_str or not genere:
+            logger.warning(f"[REGISTER] Peso o genere mancanti per email: {email}")
             flash('Peso e Genere sono campi obbligatori.')
             return redirect(url_for('register'))
         
@@ -355,16 +362,30 @@ def register():
             if peso_kg <= 0:
                 raise ValueError("Il peso deve essere positivo.")
         except ValueError as e:
+            logger.warning(f"[REGISTER] Peso non valido per email: {email} - Errore: {e}")
             flash(f'Valore del peso non valido: {e}')
             return redirect(url_for('register'))
 
         if get_user_by_email(email):
+            logger.warning(f"[REGISTER] Email già registrata: {email}")
             flash('Email già registrata.')
             return redirect(url_for('register'))
 
         # Usa la nuova funzione di hashing compatibile con tutti i server
-        secure_hash = generate_secure_password_hash(password)
-        create_user(email, secure_hash, peso_kg, genere)
+        try:
+            secure_hash = generate_secure_password_hash(password)
+            logger.info(f"[REGISTER] Hash password generato con successo per email: {email}")
+        except Exception as e:
+            logger.error(f"[REGISTER] Errore nella generazione dell'hash per email: {email} - Errore: {e}")
+            flash('Errore interno nella registrazione. Contatta il supporto.')
+            return redirect(url_for('register'))
+        try:
+            create_user(email, secure_hash, peso_kg, genere)
+            logger.info(f"[REGISTER] Utente creato con successo: {email}")
+        except Exception as e:
+            logger.error(f"[REGISTER] Errore nella creazione utente per email: {email} - Errore: {e}")
+            flash('Errore interno nella registrazione. Contatta il supporto.')
+            return redirect(url_for('register'))
         flash('Registrazione avvenuta con successo! Effettua il login.')
         return redirect(url_for('login'))
     return render_template('register.html')
@@ -374,13 +395,27 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
+        logger.info(f"[LOGIN] Tentativo di login per email: {email}")
         user = get_user_by_email(email)
 
-        if user and verify_secure_password_hash(user['fields']['Password'], password):
+        if user:
+            try:
+                result = verify_secure_password_hash(user['fields']['Password'], password)
+                logger.info(f"[LOGIN] Verifica hash per email {email}: {result}")
+            except Exception as e:
+                logger.error(f"[LOGIN] Errore nella verifica dell'hash per email {email}: {e}")
+                result = False
+        else:
+            logger.warning(f"[LOGIN] Utente non trovato per email: {email}")
+            result = False
+
+        if result:
             session['user'] = user['id']
             session['user_email'] = email
+            logger.info(f"[LOGIN] Login riuscito per email: {email}")
             return redirect(url_for('dashboard'))
         else:
+            logger.warning(f"[LOGIN] Login fallito per email: {email}")
             flash('Credenziali errate')
             return redirect(url_for('login'))
 
