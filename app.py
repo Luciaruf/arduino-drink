@@ -1,5 +1,32 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
+import hashlib, binascii, os
+
+# Funzioni alternative per l'hashing delle password compatibili con tutti i server
+def generate_secure_password_hash(password):
+    """Genera un hash della password compatibile con tutti i server"""
+    # Usa pbkdf2 che è molto supportato
+    salt = hashlib.sha256(os.urandom(60)).hexdigest().encode('ascii')
+    pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000)
+    pwdhash = binascii.hexlify(pwdhash)
+    return (salt + pwdhash).decode('ascii')
+
+def verify_secure_password_hash(stored_password, provided_password):
+    """Verifica un hash creato con generate_secure_password_hash"""
+    try:
+        # Prima prova con il metodo Werkzeug standard
+        return check_password_hash(stored_password, provided_password)
+    except ValueError:
+        try:
+            # Se fallisce, prova con il nostro metodo personalizzato
+            salt = stored_password[:64]
+            stored_password = stored_password[64:]
+            pwdhash = hashlib.pbkdf2_hmac('sha512', provided_password.encode('utf-8'), salt.encode('ascii'), 100000)
+            pwdhash = binascii.hexlify(pwdhash).decode('ascii')
+            return pwdhash == stored_password
+        except Exception:
+            # Se entrambi falliscono, ritorna False
+            return False
 import os
 from datetime import datetime, timedelta
 import requests
@@ -335,7 +362,9 @@ def register():
             flash('Email già registrata.')
             return redirect(url_for('register'))
 
-        create_user(email, generate_password_hash(password), peso_kg, genere)
+        # Usa la nuova funzione di hashing compatibile con tutti i server
+        secure_hash = generate_secure_password_hash(password)
+        create_user(email, secure_hash, peso_kg, genere)
         flash('Registrazione avvenuta con successo! Effettua il login.')
         return redirect(url_for('login'))
     return render_template('register.html')
@@ -347,7 +376,7 @@ def login():
         password = request.form['password']
         user = get_user_by_email(email)
 
-        if user and check_password_hash(user['fields']['Password'], password):
+        if user and verify_secure_password_hash(user['fields']['Password'], password):
             session['user'] = user['id']
             session['user_email'] = email
             return redirect(url_for('dashboard'))
