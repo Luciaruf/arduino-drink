@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}Drink Master - SafeSip{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Stili per l'indicatore di BAC a step */
+    .bac-steps-container {
+        position: relative;
+        margin: 30px 0;
+        padding: 20px 0;
+    }
+    
+    .bac-steps {
+        display: flex;
+        height: 30px;
+        border-radius: 15px;
+        overflow: hidden;
+    }
+    
+    .bac-step {
+        flex: 1;
+        height: 100%;
+        border-right: 1px solid rgba(255, 255, 255, 0.5);
+    }
+    
+    .bac-step:last-child {
+        border-right: none;
+    }
+    
+    .bac-indicator {
+        position: absolute;
+        top: 0;
+        width: 10px;
+        height: 70px;
+        background-color: #333;
+        border-radius: 5px;
+        transform: translateX(-50%);
+        transition: left 0.5s ease-in-out;
+        z-index: 10;
+    }
+    
+    .bac-indicator:after {
+        content: '';
+        position: absolute;
+        bottom: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-left: 10px solid transparent;
+        border-right: 10px solid transparent;
+        border-top: 10px solid #333;
+    }
+    
+    .bac-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 15px;
+        padding: 0 5px;
+    }
+    
+    .bac-labels div {
+        font-size: 0.85rem;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="text-primary mb-4">Drink Master</h1>
+    
+    <!-- Sezione BAC corrente -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Il tuo tasso alcolemico corrente</h5>
+        </div>
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h2 class="display-4">{{ bac_corrente|round(3) }} g/L</h2>
+                    <p class="lead">
+                        Stato: 
+                        {% if interpretazione_bac %}
+                            <span class="badge 
+                                {% if interpretazione_bac.livello == 'Sobrio' %}
+                                    bg-success
+                                {% elif interpretazione_bac.livello == 'Leggermente alterato' %}
+                                    bg-warning
+                                {% elif interpretazione_bac.livello == 'Alterato' %}
+                                    bg-warning text-dark
+                                {% elif interpretazione_bac.livello == 'Molto alterato' %}
+                                    bg-danger
+                                {% elif interpretazione_bac.livello == 'Altamente intossicato' %}
+                                    bg-danger
+                                {% elif interpretazione_bac.livello == 'Coma etilico' %}
+                                    bg-dark
+                                {% else %}
+                                    bg-secondary
+                                {% endif %}
+                            ">{{ interpretazione_bac.livello }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Non disponibile</span>
+                        {% endif %}
+                    </p>
+                    {% if interpretazione_bac %}
+                        <p>{{ interpretazione_bac.descrizione }}</p>
+                    {% endif %}
+                    <form action="{{ url_for('drink_master') }}" method="GET" class="mt-3">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-arrow-clockwise me-1"></i> Ricalcola BAC
+                        </button>
+                    </form>
+                </div>
+                <div class="col-md-6">
+                    <!-- Indicatore di livello BAC a step -->
+                    <div class="bac-steps-container mt-3">
+                        <div class="bac-steps">
+                            <div class="bac-step bg-success" data-level="0.0-0.3" data-bs-toggle="tooltip" title="Sobrio (0.0-0.3 g/L)"></div>
+                            <div class="bac-step bg-info" data-level="0.3-0.45" data-bs-toggle="tooltip" title="Quasi al limite legale (0.3-0.45 g/L)"></div>
+                            <div class="bac-step bg-warning" data-level="0.45-0.5" data-bs-toggle="tooltip" title="Vicino al limite legale (0.45-0.5 g/L)"></div>
+                            <div class="bac-step bg-danger" data-level="0.5+" data-bs-toggle="tooltip" title="Non mettersi alla guida (>0.5 g/L)"></div>
+                        </div>
+                        
+                        <!-- Indicatore della posizione attuale -->
+                        {% set position = (bac_corrente / 2.0 * 100)|round|int %}
+                        {% set position = [position, 100]|min %}
+                        {% set position = [position, 0]|max %}
+                        <div class="bac-indicator" style="left: {{ position }}%;"></div>
+                        
+                        <!-- Etichette -->
+                        <div class="bac-labels">
+                            <div>0.0</div>
+                            <div>0.3</div>
+                            <div>0.45</div>
+                            <div>0.5</div>
+                            <div>2.0</div>
+                        </div>
+                    </div>
+                    
+                    <small class="text-muted mt-2 d-block">Limite legale per la guida: 0.5 g/L</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sezione elenco consumazioni -->
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Le tue consumazioni</h5>
+        </div>
+        <div class="card-body">
+            {% if consumazioni %}
+                <div class="row">
+                    {% for consumazione in consumazioni %}
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100 {% if consumazione.completata %}border-success{% else %}border-warning{% endif %}">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">{{ consumazione.drink_name }}</h5>
+                                    <span class="badge bg-primary">{{ consumazione.data }}</span>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-2"><strong>Bar:</strong> {{ consumazione.bar_name }}</p>
+                                    <p class="mb-2"><strong>Sorsi:</strong> {{ consumazione.sorsi_count }}</p>
+                                    <p class="mb-2"><strong>BAC massimo:</strong> {{ consumazione.bac_max }} g/L</p>
+                                    
+                                    <div class="progress mb-3" style="height: 25px;">
+                                        <div class="progress-bar {% if consumazione.completata %}bg-success{% else %}bg-warning{% endif %}" 
+                                             role="progressbar" 
+                                             style="width: {{ consumazione.percentuale_consumata }}%;" 
+                                             aria-valuenow="{{ consumazione.percentuale_consumata }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                            {{ consumazione.percentuale_consumata|round|int }}%
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-between">
+                                        <span><strong>Volume iniziale:</strong> {{ consumazione.volume_iniziale|round|int }}g</span>
+                                        <span><strong>Consumato:</strong> {{ consumazione.volume_consumato|round|int }}g</span>
+                                        <span><strong>Rimanente:</strong> {{ consumazione.volume_rimanente|round|int }}g</span>
+                                    </div>
+                                    
+                                    {% if not consumazione.completata %}
+                                        <div class="text-center mt-3">
+                                            <a href="{{ url_for('sorsi', consumazione_id=consumazione.id) }}" class="btn btn-primary">Continua a bere</a>
+                                        </div>
+                                    {% else %}
+                                        <div class="text-center mt-3">
+                                            <span class="badge bg-success">Consumazione completata</span>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    Non hai ancora effettuato consumazioni. Seleziona un bar e inizia a bere!
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Pulsante per tornare alla selezione del bar -->
+    <div class="text-center mt-4">
+        <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-primary">Seleziona un altro bar</a>
+    </div>
+</div>
+{% endblock %}

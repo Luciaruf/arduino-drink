@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - World{% endblock %}
+
+{% block extra_css %}
+<style>
+    .leaderboard-card {
+        border-radius: 10px;
+        transition: transform 0.3s;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    .leaderboard-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+    }
+    
+    .leaderboard-header {
+        padding: 15px;
+        color: white;
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+    }
+    
+    .leaderboard-item {
+        display: flex;
+        align-items: center;
+        padding: 10px 15px;
+        border-bottom: 1px solid rgba(0,0,0,0.1);
+    }
+    
+    .leaderboard-item:last-child {
+        border-bottom: none;
+    }
+    
+    .leaderboard-rank {
+        font-weight: bold;
+        font-size: 1.2rem;
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        text-align: center;
+        border-radius: 50%;
+        margin-right: 10px;
+    }
+    
+    .rank-1 {
+        background-color: gold;
+        color: #333;
+    }
+    
+    .rank-2 {
+        background-color: silver;
+        color: #333;
+    }
+    
+    .rank-3 {
+        background-color: #cd7f32; /* bronze */
+        color: white;
+    }
+    
+    .world-stats-card {
+        border-radius: 10px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        height: 100%;
+    }
+    
+    .stats-icon {
+        font-size: 2rem;
+        margin-bottom: 10px;
+    }
+    
+    .stats-number {
+        font-size: 2.5rem;
+        font-weight: bold;
+        margin-bottom: 5px;
+        display: block;
+    }
+    
+    .stats-label {
+        color: #666;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 1px;
+    }
+    
+    .global-map {
+        height: 300px;
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        margin-top: 20px;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .map-placeholder {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+    <div class="text-center mb-4">
+        <h1 class="display-4"><i class="bi bi-globe"></i> SAFESIP World</h1>
+        <p class="lead">Scopri le classifiche globali e le statistiche dal mondo di SAFESIP</p>
+    </div>
+    
+    <!-- Statistiche globali -->
+    <div class="row mb-5">
+        <div class="col-md-3 mb-3">
+            <div class="world-stats-card bg-primary text-white">
+                <i class="bi bi-people-fill stats-icon"></i>
+                <span class="stats-number">{{ classifica|length }}</span>
+                <span class="stats-label">Utenti Attivi</span>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="world-stats-card bg-success text-white">
+                <i class="bi bi-cup-fill stats-icon"></i>
+                <span class="stats-number">{{ totale_consumazioni }}</span>
+                <span class="stats-label">Drink Consumati</span>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="world-stats-card bg-warning text-dark">
+                <i class="bi bi-shop stats-icon"></i>
+                <span class="stats-number">{{ num_bar }}</span>
+                <span class="stats-label">Bar Registrati</span>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="world-stats-card bg-danger text-white">
+                <i class="bi bi-droplet-fill stats-icon"></i>
+                <span class="stats-number">{{ totale_sorsi }}</span>
+                <span class="stats-label">Sorsi Registrati</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Classifiche -->
+    <div class="row">
+        <!-- Top Users -->
+        <div class="col-lg-4 mb-4">
+            <div class="leaderboard-card">
+                <div class="leaderboard-header bg-primary">
+                    <h3 class="mb-0"><i class="bi bi-trophy"></i> Top Bevitori</h3>
+                </div>
+                <div class="card-body p-0">
+                    {% if classifica %}
+                        {% for utente in classifica[:10] %}
+                            <div class="leaderboard-item">
+                                <div class="leaderboard-rank {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    {{ loop.index }}
+                                </div>
+                                <div>
+                                    <strong>{{ utente.nome }}</strong>
+                                    <small class="d-block text-muted">{{ utente.conteggio }} consumazioni</small>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="p-4 text-center">
+                            <p class="text-muted">Nessun dato disponibile</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Drinks -->
+        <div class="col-lg-4 mb-4">
+            <div class="leaderboard-card">
+                <div class="leaderboard-header bg-success">
+                    <h3 class="mb-0"><i class="bi bi-cup-straw"></i> Drink Più Popolari</h3>
+                </div>
+                <div class="card-body p-0">
+                    {% if drink_popolari %}
+                        {% for drink in drink_popolari[:10] %}
+                            <div class="leaderboard-item">
+                                <div class="leaderboard-rank {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    {{ loop.index }}
+                                </div>
+                                <div>
+                                    <strong>{{ drink.nome }}</strong>
+                                    <small class="d-block text-muted">{{ drink.conteggio }} ordini</small>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="p-4 text-center">
+                            <p class="text-muted">Nessun dato disponibile</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Bars -->
+        <div class="col-lg-4 mb-4">
+            <div class="leaderboard-card">
+                <div class="leaderboard-header bg-danger">
+                    <h3 class="mb-0"><i class="bi bi-shop"></i> Bar Più Frequentati</h3>
+                </div>
+                <div class="card-body p-0">
+                    {% if bar_popolari %}
+                        {% for bar in bar_popolari[:10] %}
+                            <div class="leaderboard-item">
+                                <div class="leaderboard-rank {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    {{ loop.index }}
+                                </div>
+                                <div>
+                                    <strong>{{ bar.nome }}</strong>
+                                    <small class="d-block text-muted">{{ bar.conteggio }} visite</small>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="p-4 text-center">
+                            <p class="text-muted">Nessun dato disponibile</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Le tue statistiche -->
+    <div class="card mt-4">
+        <div class="card-header bg-dark text-white">
+            <h3 class="mb-0">Le Tue Statistiche Globali</h3>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-clipboard-data"></i> Tue Consumazioni</h5>
+                            <p class="display-5 fw-bold text-primary">{{ num_consumazioni_utente }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-graph-up"></i> Tuo Tasso Medio</h5>
+                            <p class="display-5 fw-bold text-warning">{{ tasso_medio_utente|round(2) }} g/L</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-bar-chart"></i> Esiti Positivi</h5>
+                            <p class="display-5 fw-bold text-success">{{ perc_esiti_positivi_utente|round|int }}%</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-heart"></i> Drink Preferito</h5>
+                            <p class="display-5 fw-bold text-danger">{{ drink_preferito_utente }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Mappa globale (segnaposto) -->
+    <div class="global-map mt-4">
+        <div class="map-placeholder">
+            <i class="bi bi-geo-alt-fill display-1 text-muted"></i>
+            <h4 class="mt-2 text-muted">SAFESIP nel mondo</h4>
+            <p class="text-muted">I dati stanno arrivando...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

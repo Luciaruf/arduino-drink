@@ -19,12 +19,89 @@
     .table thead th i.fas {
         color: #f8f9fa; /* Bootstrap light for dark header */
     }
+    
+    /* Stili per il bicchiere stilizzato */
+    .drink-container {
+        position: relative;
+        width: 100%;
+        max-width: 150px;
+        margin: 0 auto 20px;
+    }
+    
+    .glass {
+        position: relative;
+        height: 200px;
+        background-color: rgba(200, 200, 255, 0.2);
+        border: 3px solid #0d6efd;
+        border-top: none;
+        border-radius: 0 0 15px 15px;
+        overflow: hidden;
+    }
+    
+    .glass:before {
+        content: '';
+        position: absolute;
+        top: 0;
+        width: 100%;
+        height: 10px;
+        background-color: #0d6efd;
+        border-radius: 5px 5px 0 0;
+    }
+    
+    .liquid {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        background-color: rgba(13, 110, 253, 0.7);
+        transition: height 1s cubic-bezier(0.25, 0.1, 0.25, 1);
+        height: 100%; /* Inizia al 100% */
+    }
+    
+    .drink-info {
+        text-align: center;
+        margin-top: 10px;
+        font-weight: bold;
+    }
+    
+    .drink-empty {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        transform: translateY(-50%);
+        color: #dc3545;
+        font-weight: bold;
+        font-size: 1.2em;
+        display: none;
+    }
+    
+    .drink-progress {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 5px;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
     <div class="container mt-4">
         <h2 class="mb-4 text-center text-primary"><i class="fas fa-glass-martini-alt me-2"></i> Registra Sorsi</h2>
+        
+        <!-- Bicchiere stilizzato che mostra il consumo del drink -->
+        <div class="drink-container mb-4">
+            <div class="glass">
+                <div class="liquid" id="drink-liquid"></div>
+                <div class="drink-empty" id="drink-empty">DRINK FINITO!</div>
+            </div>
+            <div class="drink-info">
+                <div id="drink-remaining">Rimanente: {{ volume_iniziale }}g</div>
+                <div class="drink-progress">
+                    <small>0g</small>
+                    <small>{{ volume_iniziale }}g</small>
+                </div>
+            </div>
+        </div>
 
         <form method="POST" class="mb-4 p-3 border rounded bg-light">
             <div class="mb-3">
@@ -83,4 +160,48 @@
         </div>
         {% endif %}
     </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Usa safe JSON parsing per evitare problemi di sintassi
+        let volumeIniziale = parseFloat({{ volume_iniziale|tojson }});
+        let volumeConsumato = parseFloat({{ volume_consumato|tojson }});
+        let volumeRimanente = parseFloat({{ volume_rimanente|tojson }});
+        console.log('DEBUG volumeIniziale:', volumeIniziale, 'volumeConsumato:', volumeConsumato, 'volumeRimanente:', volumeRimanente);
+
+        // Aggiorna il testo del volume rimanente
+        document.getElementById('drink-remaining').textContent = 'Rimanente: ' + volumeRimanente + 'g';
+
+        // Calcola la percentuale di drink rimanente e aggiorna l'altezza del liquido
+        const percentualeRimanente = (volumeRimanente / volumeIniziale) * 100;
+        const liquidElement = document.getElementById('drink-liquid');
+        console.log('Percentuale rimanente:', percentualeRimanente);
+        
+        // Forza un reflow per assicurarsi che l'animazione venga applicata
+        setTimeout(() => {
+            // Imposta l'animazione dopo un breve ritardo
+            liquidElement.style.height = percentualeRimanente + '%';
+        }, 50);
+
+        // Se il drink è finito, mostra il messaggio
+        if (volumeRimanente <= 0) {
+            document.getElementById('drink-empty').style.display = 'block';
+            // Disabilita il form se il drink è finito
+            const form = document.querySelector('form');
+            const submitButton = form.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Drink Completato';
+            document.getElementById('volume').disabled = true;
+        } else {
+            // Aggiorna il valore massimo dell'input del volume
+            document.getElementById('volume').max = volumeRimanente;
+            // Se il valore predefinito è maggiore del rimanente, aggiornalo
+            if (document.getElementById('volume').value > volumeRimanente) {
+                document.getElementById('volume').value = volumeRimanente;
+            }
+        }
+    });
+</script>
 {% endblock %}
