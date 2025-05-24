@@ -20,11 +20,18 @@ def verify_secure_password_hash(stored_password, provided_password):
         try:
             # Se fallisce, prova con il nostro metodo personalizzato
             salt = stored_password[:64]
-            stored_password = stored_password[64:]
+            hash_salvato = stored_password[64:]
             pwdhash = hashlib.pbkdf2_hmac('sha512', provided_password.encode('utf-8'), salt.encode('ascii'), 100000)
-            pwdhash = binascii.hexlify(pwdhash).decode('ascii')
-            return pwdhash == stored_password
-        except Exception:
+            pwdhash_hex = binascii.hexlify(pwdhash).decode('ascii')
+            logger.info(f"[VERIFY_HASH] Salt estratto: {salt}")
+            logger.info(f"[VERIFY_HASH] Hash calcolato: {pwdhash_hex}")
+            logger.info(f"[VERIFY_HASH] Hash salvato: {hash_salvato}")
+            logger.info(f"[VERIFY_HASH] Lunghezza hash calcolato: {len(pwdhash_hex)} | Lunghezza hash salvato: {len(hash_salvato)}")
+            result = pwdhash_hex == hash_salvato
+            logger.info(f"[VERIFY_HASH] Risultato confronto: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"[VERIFY_HASH] Errore nella verifica custom: {e}")
             # Se entrambi falliscono, ritorna False
             return False
 import os
