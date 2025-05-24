@@ -402,6 +402,108 @@ def register():
             return redirect(url_for('register'))
             
     return render_template('register.html')
+@app.route('/debug_all_tables', methods=['GET'])
+def debug_all_tables():
+    """Temporary route to debug all Airtable tables structure"""
+    tables = ['Consumazioni', 'Drinks', 'Bar', 'Users', 'Sorsi']
+    result = {}
+    
+    for table_name in tables:
+        try:
+            # Attempt to get records from this table
+            url = f'https://api.airtable.com/v0/{BASE_ID}/{table_name}'
+            headers = get_airtable_headers()
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                records = data.get('records', [])
+                
+                if records:
+                    # Get the first record as a sample
+                    sample_record = records[0]
+                    field_names = list(sample_record.get('fields', {}).keys())
+                    
+                    # Save table info
+                    result[table_name] = {
+                        'record_count': len(records),
+                        'field_names': field_names,
+                        'sample_record': sample_record
+                    }
+                else:
+                    result[table_name] = {
+                        'status': 'empty',
+                        'message': 'No records found in table'
+                    }
+            else:
+                result[table_name] = {
+                    'status': 'error',
+                    'message': f'API error: {response.status_code}',
+                    'details': response.text if response.text else 'No details available'
+                }
+        except Exception as e:
+            result[table_name] = {
+                'status': 'exception',
+                'message': str(e)
+            }
+    
+    return jsonify(result)
+
+@app.route('/debug_drinks', methods=['GET'])
+def debug_drinks():
+    """Temporary route to debug Drinks table"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+    headers = get_airtable_headers()
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        records = data.get('records', [])
+        
+        # Check if we have records
+        if records:
+            # Get all fields from the first record
+            sample_record = records[0]
+            field_names = list(sample_record.get('fields', {}).keys())
+            
+            # Return all drinks and their details
+            return jsonify({
+                'success': True,
+                'drink_count': len(records),
+                'field_names': field_names,
+                'drinks': records
+            })
+        else:
+            return jsonify({'success': False, 'error': 'No drinks found in Airtable'})
+    else:
+        return jsonify({'success': False, 'error': f'API error: {response.status_code}'})
+
+@app.route('/debug_airtable', methods=['GET'])
+def debug_airtable():
+    """Temporary route to debug Airtable field names"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
+    headers = get_airtable_headers()
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        records = data.get('records', [])
+        
+        if records:
+            # Get the first record as a sample
+            sample_record = records[0]
+            field_names = list(sample_record.get('fields', {}).keys())
+            
+            return jsonify({
+                'success': True,
+                'field_names': field_names,
+                'sample_fields': sample_record.get('fields')
+            })
+        else:
+            return jsonify({'success': False, 'error': 'No records found'})
+    else:
+        return jsonify({'success': False, 'error': f'API error: {response.status_code}'})
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -1023,6 +1125,16 @@ def invia_dato():
     except ValueError:
         return jsonify({"error": "Invalid 'peso' value"}), 400
 
+@app.route('/get_arduino_data')
+def get_arduino_data():
+    """Ottiene l'ultimo dato inviato da Arduino"""
+    global dato_da_arduino, timestamp_dato
+    
+    return jsonify({
+        'peso': dato_da_arduino,
+        'timestamp': timestamp_dato
+    })
+
 @app.route('/test-arduino')
 def test_arduino():
     global dato_da_arduino, timestamp_dato
@@ -1037,112 +1149,274 @@ def test_arduino():
                          dato=dato_da_arduino, 
                          tempo_trascorso=round(tempo_trascorso, 2))
 
-@app.route('/sorsi/<consumazione_id>', methods=['GET', 'POST'])
-def sorsi(consumazione_id):
+@app.route('/simulatore_arduino')
+def simulatore_arduino():
+    """Pagina per simulare i dati inviati da Arduino"""
     if 'user' not in session:
         flash('Devi effettuare il login per accedere a questa pagina', 'danger')
         return redirect(url_for('login'))
     
-    # Recupera i dati della consumazione
-    consumazione = get_consumazione_by_id(consumazione_id)
-    if not consumazione:
-        flash('Consumazione non trovata', 'danger')
-        return redirect(url_for('simula'))
+    return render_template('simulatore_arduino.html')
+
+@app.route('/registra_sorso_ajax/<consumazione_id>', methods=['POST'])
+def registra_sorso_ajax(consumazione_id):
+    """Endpoint per registrare un sorso via AJAX"""
+    if 'user' not in session:
+        return jsonify({'success': False, 'error': 'Utente non autenticato'})
     
-    # Verifica che la consumazione appartenga all'utente corrente
-    if consumazione['fields']['User'][0] != session['user']:
-        flash('Non hai i permessi per accedere a questa consumazione', 'danger')
-        return redirect(url_for('simula'))
+    try:
+        data = request.get_json()
+        volume = float(data.get('volume', 0))
+        
+        if volume <= 0:
+            return jsonify({'success': False, 'error': 'Volume non valido'})
+        
+        # Registra il sorso
+        sorso = registra_sorso(consumazione_id, volume)
+        
+        if isinstance(sorso, dict) and 'error' in sorso:
+            # Errore nella registrazione del sorso
+            return jsonify({'success': False, 'error': sorso['error']})
+        
+        return jsonify({
+            'success': True,
+            'sorso_id': sorso['id'] if sorso else None,
+            'volume': volume,
+            'bac': sorso['fields'].get('BAC Temporaneo', 0) if sorso and 'fields' in sorso else 0
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/check_active_consumption')
+def check_active_consumption():
+    """Verifica se c'è una consumazione attiva per l'utente corrente"""
+    if 'user' not in session:
+        return jsonify({'active': False, 'error': 'Utente non autenticato'})
     
-    # Assicurati che il bar_id sia nella sessione (utile per la navbar e intestazione)
-    consumazione_bar_id = consumazione['fields'].get('Bar', [None])[0]
-    if consumazione_bar_id and session.get('bar_id') != consumazione_bar_id:
-        session['bar_id'] = consumazione_bar_id
-
-    # Recupera i sorsi già registrati
-    sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
-    print("\nDEBUG - Sorsi registrati:", len(sorsi_registrati))
-    for sorso in sorsi_registrati:
-        print("DEBUG - Sorso:", sorso['fields'])
-
-    interpretazione_bac = None
-    bac_ultimo_sorso = None
-    if sorsi_registrati:
-        # Prendi il BAC dell'ultimo sorso registrato
-        ultimo_sorso = sorsi_registrati[0]
-        print("\nDEBUG - Ultimo sorso:", ultimo_sorso['fields'])
-        bac_ultimo_sorso = ultimo_sorso['fields'].get('BAC Temporaneo')
-        print("DEBUG - BAC ultimo sorso:", bac_ultimo_sorso)
-        if bac_ultimo_sorso is not None:
-            try:
-                bac_float = float(bac_ultimo_sorso)
-                print("DEBUG - BAC convertito in float:", bac_float)
-                interpretazione_bac = interpreta_tasso_alcolemico(bac_float)
-                print("DEBUG - Interpretazione BAC:", interpretazione_bac)
-            except Exception as e:
-                print("DEBUG - Errore interpretazione BAC:", str(e))
-                interpretazione_bac = None
-    else:
-        print("\nDEBUG - Nessun sorso registrato")
-
-    if request.method == 'POST':
-        volume = float(request.form.get('volume', 50))
-        if volume > 0:
-            # Registra il nuovo sorso
-            nuovo_sorso = registra_sorso(consumazione_id, volume)
+    try:
+        # Ottieni tutte le consumazioni dell'utente
+        user_id = session['user']['id']
+        consumazioni = get_consumazioni_by_user(user_id)
+        
+        # Trova l'ultima consumazione non completata
+        active_consumption = None
+        for consumazione in consumazioni:
+            if consumazione['fields'].get('Completato', '') == 'Non completato':
+                active_consumption = consumazione
+                break
+        
+        if active_consumption:
+            # Calcola i dettagli della consumazione
+            drink_id = active_consumption['fields'].get('Drink ID', [])[0] if 'Drink ID' in active_consumption['fields'] else None
+            drink_name = "Drink sconosciuto"
+            if drink_id:
+                drink = get_drink_by_id(drink_id)
+                if drink:
+                    drink_name = drink['fields'].get('Nome', 'Drink sconosciuto')
             
-            # Gestione degli errori specifici
-            if isinstance(nuovo_sorso, dict) and 'error' in nuovo_sorso:
-                if nuovo_sorso['error'] == 'volume_exceeded':
-                    flash(f"Volume non valido. Rimangono solo {nuovo_sorso['remaining']:.0f}g di drink.", 'danger')
-                    return redirect(url_for('sorsi', consumazione_id=consumazione_id))
+            # Calcola il peso consumato
+            initial_weight = float(active_consumption['fields'].get('Peso (g)', 0))
+            sorsi = get_sorsi_by_consumazione(active_consumption['id'])
+            consumed_weight = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
+            consumed_percentage = round((consumed_weight / initial_weight) * 100) if initial_weight > 0 else 0
             
-            print("\nDEBUG - Nuovo sorso registrato:", nuovo_sorso['fields'] if nuovo_sorso else None)
-            if nuovo_sorso and 'fields' in nuovo_sorso:
-                # Aggiungo il flash con il BAC cumulativo e la sua interpretazione
-                bac_cumulativo = nuovo_sorso['fields'].get('BAC Temporaneo')
-                if bac_cumulativo is not None:
-                    try:
-                        bac_float = float(bac_cumulativo)
-                        interpretazione = interpreta_tasso_alcolemico(bac_float)
-                        flash(f'BAC cumulativo attuale: {bac_cumulativo} g/L\nStato: {interpretazione["livello"]}', 'info')
-                    except Exception as e:
-                        print("DEBUG - Errore interpretazione BAC:", str(e))
-                        flash(f'BAC cumulativo attuale: {bac_cumulativo} g/L', 'info')
-                return redirect(url_for('sorsi', consumazione_id=consumazione_id))
-            else:
-                flash('Errore durante la registrazione del sorso', 'danger')
+            # Calcola il BAC stimato
+            bac = float(active_consumption['fields'].get('BAC Stimato', 0))
+            
+            return jsonify({
+                'active': True,
+                'consumption_id': active_consumption['id'],
+                'drink_name': drink_name,
+                'initial_weight': initial_weight,
+                'consumed_weight': consumed_weight,
+                'consumed_percentage': consumed_percentage,
+                'bac': bac
+            })
         else:
-            flash('Volume non valido', 'danger')
-
-    # DEBUG: Controlla i valori prima di renderizzare il template
-    print("\nDEBUG - PRIMA DI RENDERIZZARE TEMPLATE:")
-    print("DEBUG - sorsi_registrati:", sorsi_registrati)
-    print("DEBUG - bac_ultimo_sorso:", bac_ultimo_sorso)
-    print("DEBUG - interpretazione_bac:", interpretazione_bac)
-
-    # Calcola volume consumato e rimanente
-    volume_iniziale = float(consumazione['fields']['Peso (g)'])
-    volume_consumato = float(sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi_registrati)) if sorsi_registrati else 0.0
-    volume_rimanente = max(volume_iniziale - volume_consumato, 0.0)
+            return jsonify({'active': False})
     
-    print(f"DEBUG Volume: iniziale={volume_iniziale}g, consumato={volume_consumato}g, rimanente={volume_rimanente}g")
-    
-    # Crea un ID univoco per la sessione corrente (per evitare conflitti con altre finestre del browser)
-    session_id = session.get('unique_session_id')
-    if not session_id:
-        session_id = str(datetime.now().timestamp())
-        session['unique_session_id'] = session_id
+    except Exception as e:
+        return jsonify({'active': False, 'error': str(e)})
 
-    return render_template('sorsi.html',
-                         email=session['user_email'],
-                         consumazione_id=consumazione_id,
-                         volume_iniziale=volume_iniziale,
-                         volume_consumato=volume_consumato,
-                         volume_rimanente=volume_rimanente,
-                         sorsi_registrati=sorsi_registrati,
-                         interpretazione_bac=interpretazione_bac,
-                         bac_ultimo_sorso=bac_ultimo_sorso)
+@app.route('/finish_consumption', methods=['POST'])
+def finish_consumption():
+    """Completa una consumazione"""
+    if 'user' not in session:
+        return jsonify({'success': False, 'error': 'Utente non autenticato'})
+    
+    try:
+        data = request.get_json()
+        consumption_id = data.get('consumption_id')
+        final_weight = float(data.get('final_weight', 0))
+        
+        if not consumption_id:
+            return jsonify({'success': False, 'error': 'ID consumazione mancante'})
+        
+        # Ottieni la consumazione
+        consumazione = get_consumazione_by_id(consumption_id)
+        if not consumazione:
+            return jsonify({'success': False, 'error': 'Consumazione non trovata'})
+        
+        # Verifica che la consumazione appartenga all'utente corrente
+        if consumazione['fields'].get('User', []) and consumazione['fields']['User'][0] != session['user']:
+            return jsonify({'success': False, 'error': 'Consumazione non appartenente all\'utente'})
+        
+        # Calcola il peso già consumato
+        peso_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
+        sorsi = get_sorsi_by_consumazione(consumption_id)
+        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
+        
+        # Se c'è ancora del peso da consumare, registra un sorso finale
+        peso_residuo = peso_iniziale - volume_consumato
+        if peso_residuo > 0 and final_weight < peso_residuo:
+            volume_finale = peso_residuo - final_weight
+            if volume_finale > 0:
+                registra_sorso(consumption_id, volume_finale)
+        
+        # Marca la consumazione come completata
+        url = f"https://api.airtable.com/v0/{BASE_ID}/Consumazioni/{consumption_id}"
+        headers = {
+            'Authorization': f'Bearer {AIRTABLE_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        data = {
+            'fields': {'Completato': 'Completato'}
+        }
+        response = requests.patch(url, json=data, headers=headers)
+        if response.status_code >= 400:
+            raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
+        
+        return jsonify({'success': True})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/nuovo_drink')
+def nuovo_drink():
+    """Pagina unificata per inizializzare e monitorare un nuovo drink"""
+    if 'user' not in session:
+        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
+        return redirect(url_for('login'))
+    
+    # Verifica che sia stato selezionato un bar
+    if 'bar_id' not in session:
+        flash('Devi prima selezionare un bar', 'warning')
+        return redirect(url_for('bars'))
+    
+    # Recupera il bar_id dalla sessione
+    bar_id = session['bar_id']
+    
+    # Recupera solo i drink disponibili in quel bar
+    drinks = get_drinks(bar_id)
+    
+    # Verifica se l'utente ha già una consumazione attiva
+    user_id = session['user']  # user_id è direttamente in session['user']
+    consumazioni = get_consumazioni_by_user(user_id)
+    consumazione_attiva = None
+    
+    for consumazione in consumazioni:
+        if consumazione['fields'].get('Completato', '') == 'Non completato':
+            consumazione_attiva = consumazione
+            break
+    
+    # Se c'è una consumazione attiva, mostra i dettagli della consumazione in corso
+    # invece di reindirizzare, così l'utente può continuare a monitorarla
+    if consumazione_attiva:
+        # Recupera i dettagli del drink
+        drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
+        drink = get_drink_by_id(drink_id) if drink_id else None
+        
+        # Passa i dettagli della consumazione attiva al template
+        return render_template('nuovo_drink.html', 
+                              drinks=drinks, 
+                              consumazione_attiva=consumazione_attiva,
+                              drink_attivo=drink)
+    
+    return render_template('nuovo_drink.html', drinks=drinks)
+
+@app.route('/create_consumption', methods=['POST'])
+def create_consumption():
+    """Crea una nuova consumazione"""
+    if 'user' not in session:
+        return jsonify({'success': False, 'error': 'Utente non autenticato'})
+    
+    try:
+        data = request.get_json()
+        peso_iniziale = float(data.get('peso_iniziale', 0))
+        drink_id = data.get('drink_id')
+        
+        if peso_iniziale <= 0:
+            return jsonify({'success': False, 'error': 'Peso iniziale non valido. Assicurati che il bicchiere sia posizionato sul sottobicchiere.'})
+        
+        if not drink_id:
+            return jsonify({'success': False, 'error': 'Drink non selezionato'})
+        
+        # Recupera i dati dell'utente e del drink
+        user_id = session['user']  # user_id è direttamente in session['user']
+        drink = get_drink_by_id(drink_id)
+        
+        if not drink:
+            return jsonify({'success': False, 'error': 'Drink non trovato'})
+        
+        # Crea una nuova consumazione in Airtable
+        percentuale_alcol = float(drink['fields'].get('Percentuale', 0))
+        grammi_alcol = (percentuale_alcol / 100) * peso_iniziale
+        
+        # Calcola il BAC stimato (molto semplificato per questo esempio)
+        # Poiché session['user'] contiene solo l'ID e non info sull'utente, utilizziamo valori di default
+        peso_utente = 70  # Peso default 70kg
+        genere = 'M'  # Genere default 'M'
+        
+        # Calcola il fattore di Widmark in base al genere
+        r = 0.68 if genere == 'M' else 0.55
+        
+        # Calcola il BAC stimato
+        bac = (grammi_alcol / (peso_utente * 1000 * r)) * 100
+        
+        # Crea la consumazione usando requests invece di Airtable
+        url = f"https://api.airtable.com/v0/{BASE_ID}/Consumazioni"
+        headers = {
+            'Authorization': f'Bearer {AIRTABLE_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        # Ottieni il bar_id dalla sessione
+        bar_id = session.get('bar_id')
+        if not bar_id:
+            raise Exception('Bar non selezionato')
+            
+        # Prepara solo i dati essenziali, lasciando che Airtable gestisca i campi calcolati
+        data = {
+            'fields': {
+                'User': [user_id],
+                'Drink': [drink_id],
+                'Bar': [bar_id],
+                'Peso (g)': peso_iniziale,
+                'Tasso Calcolato (g/L)': bac,
+                'Completato': 'Non completato',
+                'Stomaco': 'Pieno'
+            }
+        }
+        response = requests.post(url, json=data, headers=headers)
+        
+        if response.status_code >= 400:
+            raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
+            
+        consumazione = response.json()
+        
+        return jsonify({
+            'success': True,
+            'consumption_id': consumazione['id'],
+            'drink_name': drink['fields'].get('Nome', 'Drink sconosciuto'),
+            'initial_weight': peso_iniziale,
+            'bac': bac
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# La funzione sorsi è stata spostata nella sezione precedente del file
+# e ora reindirizza a nuovo_drink
 
 
 def get_consumazione_by_id(consumazione_id):
@@ -1151,6 +1425,11 @@ def get_consumazione_by_id(consumazione_id):
     if response.status_code == 200:
         return response.json()
     return None
+
+
+def get_consumazioni_by_user(user_id):
+    """Wrapper function that calls get_user_consumazioni to retrieve a user's consumptions"""
+    return get_user_consumazioni(user_id=user_id)
 
 def get_sorsi_by_consumazione(consumazione_id):
     # Recupera sia i sorsi dal database che quelli in sessione (come backup)
@@ -1277,10 +1556,11 @@ def registra_sorso(consumazione_id, volume):
             return None
         
         # Dati per il calcolo
-        peso_utente = user['fields']['Peso']
-        genere = user['fields']['Genere'].lower()
-        gradazione = drink['fields']['Gradazione']
-        email_utente = user['fields']['Email']
+        # Accesso sicuro ai campi dell'utente e del drink
+        peso_utente = user['fields'].get('Peso', 70)  # Valore di default se manca
+        genere = user['fields'].get('Genere', 'M').lower()
+        gradazione = drink['fields'].get('Gradazione', 0)
+        email_utente = user['fields'].get('Email', '')
         
         # Recupera tutti i sorsi dell'utente per la giornata corrente
         sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
@@ -1300,7 +1580,7 @@ def registra_sorso(consumazione_id, volume):
                 genere=genere,
                 volume=float(volume),  # Usa il volume del sorso passato come parametro
                 gradazione=float(gradazione),
-                stomaco=consumazione['fields']['Stomaco'].lower(),
+                stomaco=consumazione['fields'].get('Stomaco', 'Pieno').lower(),
                 ora_inizio=ora_inizio.strftime('%H:%M'),
                 ora_fine=ora_fine.strftime('%H:%M')
             )
@@ -1378,9 +1658,23 @@ def registra_sorso(consumazione_id, volume):
         
         # Registra il sorso in Airtable
         url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+        
+        # Ottieni un nuovo ID incrementale per il sorso
+        last_id = 0
+        sorsi_esistenti = get_sorsi_by_consumazione(consumazione_id)
+        if sorsi_esistenti:
+            for sorso in sorsi_esistenti:
+                if 'fields' in sorso and 'Id' in sorso['fields']:
+                    sorso_id = int(sorso['fields']['Id'])
+                    if sorso_id > last_id:
+                        last_id = sorso_id
+        
+        new_id = last_id + 1
+        
         data = {
             'records': [{
                 'fields': {
+                    'Id': new_id,
                     'Consumazioni Id': [consumazione_id],
                     'Volume (g)': volume,
                     'Email': email_utente,
@@ -1644,6 +1938,29 @@ def game():
                          user=user, 
                          game_data=template_game_data,
                          leaderboard=leaderboard)
+
+@app.route('/sorsi/<consumazione_id>')
+def sorsi(consumazione_id):
+    """Reindirizza alla pagina nuovo_drink poiché ora utilizziamo un approccio unificato"""
+    if 'user' not in session:
+        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
+        return redirect(url_for('login'))
+    
+    # Verifica che la consumazione esista
+    consumazione = get_consumazione_by_id(consumazione_id)
+    if not consumazione:
+        flash('Consumazione non trovata', 'danger')
+        return redirect(url_for('drink_master'))
+    
+    # Verifica che la consumazione appartenga all'utente corrente
+    user_id = session['user']
+    if user_id not in consumazione['fields'].get('User', []):
+        flash('Non hai accesso a questa consumazione', 'danger')
+        return redirect(url_for('drink_master'))
+    
+    # Reindirizza alla nuova pagina unificata
+    flash('Ora utilizziamo un approccio unificato per il monitoraggio dei drink', 'info')
+    return redirect(url_for('nuovo_drink'))
 
 @app.route('/drink_master')
 def drink_master():

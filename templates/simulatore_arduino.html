@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulatore Arduino</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f4f9ff;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+            border-top-left-radius: 15px !important;
+            border-top-right-radius: 15px !important;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        .history-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .weight-change {
+            font-weight: bold;
+        }
+        .positive {
+            color: green;
+        }
+        .negative {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">Simulatore Arduino - SafeSip</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Invia Peso</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="weightForm" class="mb-3">
+                            <div class="form-group mb-3">
+                                <label for="weightInput">Peso (grammi):</label>
+                                <input type="number" step="0.1" class="form-control" id="weightInput" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Invia Peso</button>
+                        </form>
+                        <div class="alert alert-info" id="lastSentWeight" style="display: none;">
+                            Ultimo peso inviato: <span id="lastWeightValue"></span>g
+                        </div>
+                        <div id="responseMessage" class="alert" style="display: none;"></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Consumazione Attiva</h5>
+                    </div>
+                    <div class="card-body" id="activeConsumption">
+                        <div class="alert alert-warning">
+                            Nessuna consumazione attiva. Invia un peso iniziale per iniziare.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Storico Pesi</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="weightHistory">
+                            <div class="alert alert-secondary">
+                                Nessun dato registrato
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Azioni</h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="finishDrinkBtn" class="btn btn-success w-100 mb-2" disabled>Ho Finito il Drink</button>
+                        <a href="/drink_master" class="btn btn-outline-primary w-100">Torna a Drink Master</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Variabili globali
+        let weightHistory = [];
+        let activeConsumptionId = null;
+        
+        // Evento per l'invio del peso
+        document.getElementById('weightForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const weightInput = document.getElementById('weightInput');
+            const weight = parseFloat(weightInput.value);
+            
+            if (isNaN(weight)) {
+                showMessage('Inserisci un peso valido.', 'danger');
+                return;
+            }
+            
+            // Invia il peso al server
+            sendWeight(weight);
+        });
+        
+        // Funzione per inviare il peso al server
+        function sendWeight(weight) {
+            fetch('/invia_dato', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ peso: weight })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    // Aggiorna l'interfaccia
+                    document.getElementById('lastWeightValue').textContent = weight;
+                    document.getElementById('lastSentWeight').style.display = 'block';
+                    showMessage('Peso inviato con successo!', 'success');
+                    
+                    // Aggiungi alla cronologia
+                    addToHistory(weight);
+                    
+                    // Verifica se c'è una consumazione attiva
+                    checkActiveConsumption();
+                    
+                    // Abilita il pulsante "Ho finito" dopo il primo peso
+                    document.getElementById('finishDrinkBtn').disabled = false;
+                } else {
+                    showMessage('Errore: ' + data.error, 'danger');
+                }
+            })
+            .catch(error => {
+                showMessage('Errore di rete: ' + error.message, 'danger');
+            });
+        }
+        
+        // Funzione per aggiungere un peso alla cronologia
+        function addToHistory(weight) {
+            const timestamp = new Date();
+            
+            // Calcola la differenza con il peso precedente
+            let difference = 0;
+            if (weightHistory.length > 0) {
+                difference = weightHistory[weightHistory.length - 1].weight - weight;
+            }
+            
+            // Aggiungi alla cronologia
+            weightHistory.push({
+                weight: weight,
+                timestamp: timestamp,
+                difference: difference
+            });
+            
+            // Aggiorna la visualizzazione della cronologia
+            updateHistoryDisplay();
+        }
+        
+        // Funzione per aggiornare la visualizzazione della cronologia
+        function updateHistoryDisplay() {
+            const historyContainer = document.getElementById('weightHistory');
+            historyContainer.innerHTML = '';
+            
+            if (weightHistory.length === 0) {
+                historyContainer.innerHTML = '<div class="alert alert-secondary">Nessun dato registrato</div>';
+                return;
+            }
+            
+            weightHistory.forEach((entry, index) => {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                
+                let differenceHtml = '';
+                if (index > 0) {
+                    const differenceClass = entry.difference > 0 ? 'positive' : 'negative';
+                    differenceHtml = `<span class="weight-change ${differenceClass}">
+                        ${entry.difference > 0 ? '+' : ''}${entry.difference.toFixed(1)}g
+                    </span>`;
+                }
+                
+                historyItem.innerHTML = `
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <strong>${entry.weight.toFixed(1)}g</strong>
+                            ${differenceHtml}
+                        </div>
+                        <small class="text-muted">${entry.timestamp.toLocaleTimeString()}</small>
+                    </div>
+                `;
+                
+                historyContainer.insertBefore(historyItem, historyContainer.firstChild);
+            });
+        }
+        
+        // Funzione per verificare lo stato della consumazione attiva
+        function checkActiveConsumption() {
+            fetch('/check_active_consumption', {
+                method: 'GET'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.active) {
+                    activeConsumptionId = data.consumption_id;
+                    updateActiveConsumptionDisplay(data);
+                } else {
+                    // Se non c'è una consumazione attiva, crea una nuova (solo se abbiamo almeno un peso)
+                    if (weightHistory.length > 0 && !activeConsumptionId) {
+                        createNewConsumption(weightHistory[0].weight);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Errore durante il controllo della consumazione attiva:', error);
+            });
+        }
+        
+        // Funzione per creare una nuova consumazione
+        function createNewConsumption(initialWeight) {
+            fetch('/create_consumption', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    peso_iniziale: initialWeight 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    activeConsumptionId = data.consumption_id;
+                    updateActiveConsumptionDisplay(data);
+                    showMessage('Nuova consumazione creata!', 'success');
+                } else {
+                    showMessage('Errore nella creazione della consumazione: ' + data.error, 'danger');
+                }
+            })
+            .catch(error => {
+                showMessage('Errore di rete: ' + error.message, 'danger');
+            });
+        }
+        
+        // Funzione per aggiornare la visualizzazione della consumazione attiva
+        function updateActiveConsumptionDisplay(data) {
+            const container = document.getElementById('activeConsumption');
+            
+            if (data.active) {
+                container.innerHTML = `
+                    <div class="mb-2">
+                        <strong>Drink:</strong> ${data.drink_name}
+                    </div>
+                    <div class="mb-2">
+                        <strong>Peso iniziale:</strong> ${data.initial_weight}g
+                    </div>
+                    <div class="mb-2">
+                        <strong>Consumato:</strong> ${data.consumed_weight}g (${data.consumed_percentage}%)
+                    </div>
+                    <div class="mb-2">
+                        <strong>BAC stimato:</strong> ${data.bac} g/L
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-primary" role="progressbar" 
+                             style="width: ${data.consumed_percentage}%" 
+                             aria-valuenow="${data.consumed_percentage}" 
+                             aria-valuemin="0" aria-valuemax="100">
+                        </div>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div class="alert alert-warning">
+                        Nessuna consumazione attiva. Invia un peso iniziale per iniziare.
+                    </div>
+                `;
+            }
+        }
+        
+        // Funzione per terminare la consumazione attiva
+        document.getElementById('finishDrinkBtn').addEventListener('click', function() {
+            if (!activeConsumptionId) {
+                showMessage('Nessuna consumazione attiva da terminare.', 'warning');
+                return;
+            }
+            
+            fetch('/finish_consumption', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    consumption_id: activeConsumptionId,
+                    final_weight: weightHistory[weightHistory.length - 1].weight
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showMessage('Consumazione completata con successo!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/drink_master';
+                    }, 2000);
+                } else {
+                    showMessage('Errore nel completamento della consumazione: ' + data.error, 'danger');
+                }
+            })
+            .catch(error => {
+                showMessage('Errore di rete: ' + error.message, 'danger');
+            });
+        });
+        
+        // Funzione per mostrare messaggi
+        function showMessage(message, type) {
+            const messageElement = document.getElementById('responseMessage');
+            messageElement.textContent = message;
+            messageElement.className = 'alert alert-' + type;
+            messageElement.style.display = 'block';
+            
+            // Nascondi il messaggio dopo 5 secondi
+            setTimeout(() => {
+                messageElement.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Verifica iniziale per la consumazione attiva
+        checkActiveConsumption();
+    </script>
+</body>
+</html>

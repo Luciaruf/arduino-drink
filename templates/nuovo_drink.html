@@ -1,0 +1,702 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Nuovo Drink{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Stili per il bicchiere */
+    #drink-container {
+        width: 120px;
+        height: 200px;
+        margin: 0 auto;
+        position: relative;
+    }
+    
+    #drink-glass {
+        width: 100%;
+        height: 100%;
+        background-color: rgba(255, 255, 255, 0.2);
+        border: 5px solid rgba(255, 255, 255, 0.5);
+        border-top: none;
+        border-radius: 0 0 15px 15px;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    #drink-liquid {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 0%;
+        background-color: rgba(255, 215, 0, 0.7);
+        transition: height 1s ease-out;
+        border-radius: 0 0 10px 10px;
+    }
+    
+    #drink-empty {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-weight: bold;
+        color: rgba(255, 0, 0, 0.7);
+        text-align: center;
+        font-size: 1.2rem;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+    }
+    
+    /* Stili per la cronologia dei pesi */
+    .history-item {
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .history-item:last-child {
+        border-bottom: none;
+    }
+    
+    .weight-change {
+        font-weight: bold;
+    }
+    
+    .positive {
+        color: green;
+    }
+    
+    .negative {
+        color: red;
+    }
+    
+    /* Animazioni */
+    .fade-in {
+        animation: fadeIn 0.5s ease-in;
+    }
+    
+    @keyframes fadeIn {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+    
+    /* Animazione per il peso */
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
+    
+    .pulse {
+        animation: pulse 0.5s;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+    <div class="container mt-4">
+        <h2 class="mb-4 text-center text-primary"><i class="fas fa-glass-martini-alt me-2"></i> Nuovo Drink</h2>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {% if category == 'success' %}alert-success{% elif category == 'info' %}alert-info{% else %}alert-danger{% endif %} alert-dismissible fade show mb-4" role="alert">
+                        <div class="d-flex align-items-center">
+                            {% if category == 'success' %}
+                                <span class="smiley-icon">😊</span>
+                            {% elif category == 'info' %}
+                                <span class="smiley-icon">🤔</span>
+                            {% else %}
+                                <span class="smiley-icon">😟</span>
+                            {% endif %}
+                            <div>
+                                 {{ message }}
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="row">
+            <div class="col-md-6">
+                {% if consumazione_attiva %}
+                <!-- Card per la consumazione attiva -->
+                <div class="card mb-4" id="consumazione-attiva-card">
+                    <div class="card-header bg-warning text-white">
+                        <h5 class="mb-0"><i class="fas fa-glass-cheers me-2"></i> Consumazione in Corso</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i> Hai già una consumazione attiva. Completa questa prima di iniziarne una nuova.
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>Dettagli Consumazione:</h5>
+                            <p><strong>Drink:</strong> {{ drink_attivo.fields.Name if drink_attivo else 'Sconosciuto' }}</p>
+                            <p><strong>Peso iniziale:</strong> {{ consumazione_attiva.fields['Peso (g)'] }}g</p>
+                            <p><strong>Data inizio:</strong> {{ consumazione_attiva.fields.Data }} {{ consumazione_attiva.fields['Ora inizio'] }}</p>
+                        </div>
+                        
+                        <button type="button" id="continua-monitoraggio" class="btn btn-primary w-100">
+                            <i class="fas fa-chart-line me-2"></i> Continua Monitoraggio
+                        </button>
+                    </div>
+                </div>
+                {% else %}
+                <!-- Card per inizializzare un nuovo drink -->
+                <div class="card mb-4" id="inizializza-drink-card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-glass-cheers me-2"></i> Inizializza Drink</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="step-1" class="fade-in">
+                            <p class="lead">Seleziona il drink che vuoi consumare:</p>
+                            
+                            <form id="drink-form">
+                                <div class="mb-3">
+                                    <label for="drink-select" class="form-label">Drink</label>
+                                    <select class="form-select" id="drink-select" required>
+                                        <option value="" selected disabled>Seleziona un drink...</option>
+                                        {% for drink in drinks %}
+                                            <option value="{{ drink.id }}" data-alcol="{{ drink.fields.Gradazione }}">{{ drink.fields.Name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i> Posiziona il bicchiere sul sottobicchiere e premi "Inizia".
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-play-circle me-2"></i> Inizia
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Card per monitorare i dati del peso -->
+                <div class="card mb-4" id="monitoraggio-card" style="display: none;">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-weight me-2"></i> Monitoraggio Peso</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="status-message" class="alert alert-info mb-3">
+                            <i class="fas fa-info-circle me-2"></i> In attesa di dati dal sottobicchiere...
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title"><i class="fas fa-weight me-2"></i> Peso Attuale</h6>
+                                        <p class="display-6" id="ultimo-peso">--</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title"><i class="fas fa-tint me-2"></i> Ultimo Sorso</h6>
+                                        <p class="display-6" id="ultimo-sorso">--</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6 class="mb-2">Sorsi Totali: <span id="sorsi-totali">0</span></h6>
+                            <h6 class="mb-2">Volume Consumato: <span id="volume-consumato">0</span>g</h6>
+                        </div>
+                        
+                        <form id="finish-form" method="POST">
+                            <button type="submit" class="btn btn-success w-100">
+                                <i class="fas fa-check-circle me-2"></i> Ho finito
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <!-- Card per visualizzare il drink -->
+                <div class="card mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-wine-glass-alt me-2"></i> <span id="drink-name-display">Il tuo Drink</span></h5>
+                    </div>
+                    <div class="card-body text-center">
+                        <div id="drink-container">
+                            <div id="drink-glass">
+                                <div id="drink-liquid"></div>
+                                <div id="drink-empty">DRINK FINITO</div>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <h5 id="drink-remaining">Rimanente: --</h5>
+                            <p id="drink-percentage">0%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Card per la cronologia dei pesi -->
+                <div class="card mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-history me-2"></i> Cronologia</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="weight-history">
+                            <div class="alert alert-secondary">
+                                Nessun dato registrato
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Card per i dettagli del drink -->
+                <div class="card mb-4" id="drink-details-card" style="display: none;">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Dettagli</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-wine-bottle me-2"></i>Drink</span>
+                                <span class="badge bg-primary rounded-pill" id="drink-detail-name">--</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-percentage me-2"></i>% Alcol</span>
+                                <span class="badge bg-primary rounded-pill" id="drink-detail-alcol">--</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-weight me-2"></i>Peso iniziale</span>
+                                <span class="badge bg-primary rounded-pill" id="drink-detail-peso">--</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-wine-glass-alt me-2"></i>Consumato</span>
+                                <span class="badge bg-primary rounded-pill" id="drink-detail-consumato">--</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-tachometer-alt me-2"></i>BAC stimato</span>
+                                <span class="badge bg-primary rounded-pill" id="drink-detail-bac">--</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-3 text-center">
+            <a href="/drink_master" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left me-2"></i> Torna a Drink Master
+            </a>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Variabili globali
+        let selectedDrinkId = null;
+        let selectedDrinkName = "";
+        let percentualeAlcol = 0;
+        let consumazioneId = null;
+        let pesoIniziale = 0;
+        let volumeConsumato = 0;
+        let ultimoPeso = null;
+        let pesiRilevati = [];
+        let sorsiCalcolati = [];
+        let pollingActive = false;
+        
+        // Verifica se c'è una consumazione attiva
+        {% if consumazione_attiva %}
+            // Inizializza i dati della consumazione attiva
+            consumazioneId = "{{ consumazione_attiva.id }}";
+            selectedDrinkId = "{{ drink_attivo.id if drink_attivo else '' }}";
+            selectedDrinkName = "{{ drink_attivo.fields.Nome if drink_attivo else 'Sconosciuto' }}";
+            percentualeAlcol = "{{ drink_attivo.fields.Percentuale if drink_attivo else '0' }}";
+            pesoIniziale = {{ consumazione_attiva.fields['Peso (g)'] }};
+            
+            // Event listener per il pulsante 'Continua Monitoraggio'
+            document.getElementById('continua-monitoraggio').addEventListener('click', function() {
+                // Nascondi la card della consumazione attiva
+                document.getElementById('consumazione-attiva-card').style.display = 'none';
+                
+                // Mostra le card di monitoraggio e dettagli
+                document.getElementById('monitoraggio-card').style.display = 'block';
+                document.getElementById('drink-details-card').style.display = 'block';
+                
+                // Aggiorna l'interfaccia con i dettagli della consumazione
+                document.getElementById('drink-name-display').textContent = selectedDrinkName;
+                document.getElementById('drink-detail-name').textContent = selectedDrinkName;
+                document.getElementById('drink-detail-alcol').textContent = percentualeAlcol + "%";
+                document.getElementById('drink-detail-peso').textContent = pesoIniziale + "g";
+                document.getElementById('drink-remaining').textContent = 'Rimanente: ' + pesoIniziale + 'g';
+                
+                // Avvia il polling dei dati Arduino
+                startArduinoPolling();
+                
+                // Aggiorna il messaggio di stato
+                updateStatusMessage('Monitoraggio in corso...', 'info');
+            });
+        {% endif %}
+        
+        // Event listeners per il form del drink
+        {% if not consumazione_attiva %}
+        const drinkForm = document.getElementById('drink-form');
+        if (drinkForm) {
+            drinkForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const drinkSelect = document.getElementById('drink-select');
+            if (drinkSelect.value) {
+                selectedDrinkId = drinkSelect.value;
+                const option = drinkSelect.options[drinkSelect.selectedIndex];
+                selectedDrinkName = option.text;
+                percentualeAlcol = option.dataset.alcol;
+                
+                // Aggiorna l'interfaccia
+                document.getElementById('drink-name-display').textContent = selectedDrinkName;
+                document.getElementById('drink-detail-name').textContent = selectedDrinkName;
+                document.getElementById('drink-detail-alcol').textContent = percentualeAlcol + "%";
+                
+                // Avvia il polling dei dati Arduino per ottenere il peso iniziale
+                startArduinoPolling();
+                
+                // Mostra le card appropriate
+                document.getElementById('inizializza-drink-card').style.display = 'none';
+                document.getElementById('monitoraggio-card').style.display = 'block';
+                document.getElementById('drink-details-card').style.display = 'block';
+                
+                // Aggiorna il messaggio di stato
+                updateStatusMessage('In attesa del peso iniziale...', 'info');
+            }
+        });
+        }
+        {% endif %}
+        
+        // Event listener per il form di completamento
+        const finishForm = document.getElementById('finish-form');
+        if (finishForm) {
+            finishForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            if (!consumazioneId) {
+                updateStatusMessage('Nessuna consumazione attiva da terminare', 'warning');
+                return;
+            }
+            
+            // Disabilita il pulsante per evitare doppi click
+            const submitButton = this.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Completamento in corso...';
+            
+            // Termina la consumazione
+            finishConsumption();
+        });
+        }
+        
+        // Funzione per avviare il polling dei dati Arduino
+        function startArduinoPolling() {
+            if (pollingActive) return;
+            
+            pollingActive = true;
+            pollArduinoData();
+        }
+        
+        // Funzione per effettuare il polling dei dati da Arduino
+        function pollArduinoData() {
+            if (!pollingActive) return;
+            
+            fetch('/get_arduino_data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.peso !== null) {
+                        handleNewWeight(data.peso);
+                    }
+                })
+                .catch(error => {
+                    console.error('Errore nel polling dei dati Arduino:', error);
+                })
+                .finally(() => {
+                    // Continua il polling ogni 500ms
+                    setTimeout(pollArduinoData, 500);
+                });
+        }
+        
+        // Funzione per gestire un nuovo peso rilevato
+        function handleNewWeight(peso) {
+            // Aggiorna l'interfaccia con il nuovo peso
+            const pesoElement = document.getElementById('ultimo-peso');
+            pesoElement.textContent = peso + 'g';
+            pesoElement.classList.add('pulse');
+            setTimeout(() => {
+                pesoElement.classList.remove('pulse');
+            }, 500);
+            
+            // Se non c'è ancora una consumazione attiva e questo è il primo peso
+            if (!consumazioneId && ultimoPeso === null) {
+                ultimoPeso = peso;
+                pesoIniziale = peso;
+                
+                // Aggiorna l'interfaccia
+                document.getElementById('drink-detail-peso').textContent = peso + 'g';
+                document.getElementById('drink-remaining').textContent = 'Rimanente: ' + peso + 'g';
+                
+                // Registra il peso nella cronologia
+                addToHistory(peso, 0);
+                
+                // Crea una nuova consumazione
+                createNewConsumption(peso);
+                
+                return;
+            }
+            
+            // Se c'è già una consumazione attiva
+            if (consumazioneId && ultimoPeso !== null) {
+                // Calcola la differenza di peso (sorso)
+                const differenzaPeso = ultimoPeso - peso;
+                
+                // Se la differenza è significativa (> 5g), considerala un sorso
+                if (differenzaPeso > 5) {
+                    // Registra il sorso
+                    registraSorso(differenzaPeso);
+                    
+                    // Aggiorna l'interfaccia
+                    const sorsoElement = document.getElementById('ultimo-sorso');
+                    sorsoElement.textContent = differenzaPeso.toFixed(1) + 'g';
+                    sorsoElement.classList.add('pulse');
+                    setTimeout(() => {
+                        sorsoElement.classList.remove('pulse');
+                    }, 500);
+                    
+                    updateStatusMessage('Sorso rilevato: ' + differenzaPeso.toFixed(1) + 'g', 'success');
+                    
+                    // Aggiorna i dati
+                    addToHistory(peso, differenzaPeso);
+                    
+                    sorsiCalcolati.push({
+                        volume: differenzaPeso,
+                        timestamp: new Date()
+                    });
+                    
+                    volumeConsumato += differenzaPeso;
+                    updateDrinkLevel();
+                } else if (Math.abs(differenzaPeso) > 1) {
+                    // Piccola variazione di peso, aggiorna il dato
+                    updateStatusMessage('Variazione di peso rilevata: ' + differenzaPeso.toFixed(1) + 'g', 'info');
+                }
+            }
+            
+            // Aggiorna l'ultimo peso
+            ultimoPeso = peso;
+        }
+        
+        // Funzione per aggiungere un peso alla cronologia
+        function addToHistory(peso, differenza) {
+            const timestamp = new Date();
+            
+            // Aggiungi alla cronologia
+            pesiRilevati.push({
+                peso: peso,
+                timestamp: timestamp,
+                differenza: differenza
+            });
+            
+            // Aggiorna la visualizzazione della cronologia
+            updateHistoryDisplay();
+        }
+        
+        // Funzione per aggiornare la visualizzazione della cronologia
+        function updateHistoryDisplay() {
+            const historyContainer = document.getElementById('weight-history');
+            historyContainer.innerHTML = '';
+            
+            if (pesiRilevati.length === 0) {
+                historyContainer.innerHTML = '<div class="alert alert-secondary">Nessun dato registrato</div>';
+                return;
+            }
+            
+            // Mostra gli ultimi 10 elementi in ordine inverso (più recenti in alto)
+            const recentItems = [...pesiRilevati].reverse().slice(0, 10);
+            
+            recentItems.forEach((entry, index) => {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                
+                let differenceHtml = '';
+                if (entry.differenza > 0) {
+                    differenceHtml = `<span class="weight-change negative">
+                        -${entry.differenza.toFixed(1)}g (sorso)
+                    </span>`;
+                }
+                
+                historyItem.innerHTML = `
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <strong>${entry.peso.toFixed(1)}g</strong>
+                            ${differenceHtml}
+                        </div>
+                        <small class="text-muted">${entry.timestamp.toLocaleTimeString()}</small>
+                    </div>
+                `;
+                
+                historyContainer.appendChild(historyItem);
+            });
+        }
+        
+        // Funzione per creare una nuova consumazione
+        function createNewConsumption(initialWeight) {
+            fetch('/create_consumption', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    drink_id: selectedDrinkId,
+                    peso_iniziale: initialWeight 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    consumazioneId = data.consumption_id;
+                    updateStatusMessage('Consumazione iniziata! Peso iniziale: ' + initialWeight + 'g', 'success');
+                    
+                    // Inizializza il livello del drink
+                    updateDrinkLevel();
+                } else {
+                    updateStatusMessage('Errore: ' + data.error, 'danger');
+                }
+            })
+            .catch(error => {
+                updateStatusMessage('Errore di rete: ' + error.message, 'danger');
+            });
+        }
+        
+        // Funzione per registrare un sorso
+        function registraSorso(volume) {
+            if (!consumazioneId) return;
+            
+            // Invia i dati al server in modo asincrono
+            fetch('/registra_sorso_ajax/' + consumazioneId, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ volume: volume })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Sorso registrato con successo');
+                    
+                    // Aggiorna il BAC se disponibile
+                    if (data.bac) {
+                        document.getElementById('drink-detail-bac').textContent = data.bac + ' g/L';
+                    }
+                    
+                    // Aggiorna dettagli consumato
+                    document.getElementById('drink-detail-consumato').textContent = volumeConsumato.toFixed(1) + 'g';
+                } else {
+                    console.error('Errore nella registrazione del sorso:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Errore nella registrazione del sorso:', error);
+            });
+        }
+        
+        // Funzione per terminare la consumazione
+        function finishConsumption() {
+            if (!consumazioneId) return;
+            
+            fetch('/finish_consumption', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    consumption_id: consumazioneId,
+                    final_weight: ultimoPeso || 0
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateStatusMessage('Consumazione completata con successo!', 'success');
+                    
+                    // Interrompi il polling
+                    pollingActive = false;
+                    
+                    // Reindirizza a drink master dopo 2 secondi
+                    setTimeout(() => {
+                        window.location.href = '/drink_master';
+                    }, 2000);
+                } else {
+                    updateStatusMessage('Errore: ' + data.error, 'danger');
+                    
+                    // Riattiva il pulsante
+                    document.querySelector('#finish-form button').disabled = false;
+                    document.querySelector('#finish-form button').innerHTML = '<i class="fas fa-check-circle me-2"></i> Ho finito';
+                }
+            })
+            .catch(error => {
+                updateStatusMessage('Errore di rete: ' + error.message, 'danger');
+                
+                // Riattiva il pulsante
+                document.querySelector('#finish-form button').disabled = false;
+                document.querySelector('#finish-form button').innerHTML = '<i class="fas fa-check-circle me-2"></i> Ho finito';
+            });
+        }
+        
+        // Funzione per aggiornare il livello del liquido nel bicchiere
+        function updateDrinkLevel() {
+            if (pesoIniziale <= 0) return;
+            
+            // Calcola la percentuale per l'animazione del bicchiere
+            // Nota: non usiamo più questa percentuale per mostrare il progresso
+            // ma solo per l'animazione visiva del bicchiere
+            const percentageRemaining = Math.max(0, 100 - (volumeConsumato / pesoIniziale * 100));
+            
+            // Aggiorna il liquido nel bicchiere
+            document.getElementById('drink-liquid').style.height = percentageRemaining + '%';
+            
+            // Aggiorna il testo del peso rimanente
+            const pesoRimanente = Math.max(0, pesoIniziale - volumeConsumato);
+            document.getElementById('drink-remaining').textContent = 'Rimanente: ' + Math.round(pesoRimanente) + 'g';
+            
+            // Aggiorna i contatori di sorsi e volume
+            document.getElementById('sorsi-totali').textContent = sorsiCalcolati.length;
+            document.getElementById('volume-consumato').textContent = volumeConsumato.toFixed(1);
+            
+            // Aggiorna il dettaglio del drink
+            document.getElementById('drink-detail-consumato').textContent = volumeConsumato.toFixed(1) + 'g';
+            
+            // Mostra/nascondi messaggio "DRINK FINITO" in base al livello
+            if (percentageRemaining < 5) {
+                document.getElementById('drink-empty').style.opacity = '1';
+            } else {
+                document.getElementById('drink-empty').style.opacity = '0';
+            }
+        }
+        
+        // Funzione per aggiornare il messaggio di stato
+        function updateStatusMessage(message, type) {
+            const messageElement = document.getElementById('status-message');
+            
+            let icon = 'info-circle';
+            if (type === 'success') icon = 'check-circle';
+            else if (type === 'warning') icon = 'exclamation-triangle';
+            else if (type === 'danger') icon = 'times-circle';
+            
+            messageElement.innerHTML = `<i class="fas fa-${icon} me-2"></i> ${message}`;
+            messageElement.className = `alert alert-${type} mb-3`;
+        }
+    });
+</script>
+{% endblock %}

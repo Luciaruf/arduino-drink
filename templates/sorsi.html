@@ -103,16 +103,79 @@
             </div>
         </div>
 
-        <form method="POST" class="mb-4 p-3 border rounded bg-light">
-            <div class="mb-3">
-                <label for="volume" class="form-label"><i class="fas fa-tint me-2"></i> Volume del sorso (g):</label>
-                <input type="number" class="form-control form-control-lg" id="volume" name="volume" min="1" max="{{ volume_iniziale }}" value="50" required>
-                <small class="form-text text-muted"><i class="fas fa-info-circle me-1"></i> Volume massimo disponibile: {{ volume_iniziale }}g</small>
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-weight me-2"></i> Dati Arduino</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div id="drink-container">
+                                    <div id="drink-glass">
+                                        <div id="drink-liquid"></div>
+                                        <div id="drink-empty">DRINK FINITO</div>
+                                    </div>
+                                </div>
+                                <div class="text-center mt-2">
+                                    <h5 id="drink-remaining">Rimanente: {{ volume_rimanente }}g</h5>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <h5><i class="fas fa-info-circle me-2"></i>Dettagli Drink</h5>
+                                    <ul class="list-group">
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-wine-bottle me-2"></i>Drink</span>
+                                            <span class="badge bg-primary rounded-pill">{{ drink_name }}</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-percentage me-2"></i>% Alcol</span>
+                                            <span class="badge bg-primary rounded-pill">{{ percentuale_alcol }}%</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-weight me-2"></i>Volume iniziale</span>
+                                            <span class="badge bg-primary rounded-pill">{{ volume_iniziale }}g</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-wine-glass-alt me-2"></i>Volume consumato</span>
+                                            <span class="badge bg-primary rounded-pill">{{ volume_consumato }}g</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                
+                                <!-- Arduino data section -->
+                                <div class="mb-3" id="arduino-data-section">
+                                    <h5><i class="fas fa-microchip me-2"></i>Dati Arduino</h5>
+                                    <div id="status-message" class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>In attesa di dati da Arduino...
+                                    </div>
+                                    <ul class="list-group">
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-weight me-2"></i>Ultimo peso rilevato</span>
+                                            <span class="badge bg-secondary rounded-pill" id="ultimo-peso">--</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-tint me-2"></i>Ultimo sorso</span>
+                                            <span class="badge bg-secondary rounded-pill" id="ultimo-sorso">--</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                
+                                <!-- Form per segnalare la fine del drink -->
+                                <div class="mt-3">
+                                    <form id="finish-form" method="POST" action="{{ url_for('sorsi', consumazione_id=consumazione_id) }}">
+                                        <input type="hidden" name="finish" value="true">
+                                        <button type="submit" class="btn btn-success w-100" {% if volume_rimanente <= 0 %}disabled{% endif %}>
+                                            <i class="fas fa-check-circle me-2"></i>Ho finito
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="d-grid">
-                <button type="submit" class="btn btn-primary btn-lg"><i class="fas fa-plus-circle me-2"></i> Registra Sorso</button>
-            </div>
-        </form>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -192,16 +255,130 @@
             const form = document.querySelector('form');
             const submitButton = form.querySelector('button[type="submit"]');
             submitButton.disabled = true;
-            submitButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Drink Completato';
-            document.getElementById('volume').disabled = true;
-        } else {
-            // Aggiorna il valore massimo dell'input del volume
-            document.getElementById('volume').max = volumeRimanente;
-            // Se il valore predefinito è maggiore del rimanente, aggiornalo
-            if (document.getElementById('volume').value > volumeRimanente) {
-                document.getElementById('volume').value = volumeRimanente;
+        }
+
+        // Variabili globali per tenere traccia dei pesi e dei sorsi
+        let ultimoPeso = null;
+        let pesiRilevati = [];
+        let sorsiCalcolati = [];
+
+        // Funzione per aggiornare il livello del liquido nel bicchiere
+        function updateLiquidLevel() {
+            const percentageRemaining = 100 - (volumeConsumato / volumeIniziale * 100);
+            document.getElementById('drink-liquid').style.height = percentageRemaining + '%';
+            document.getElementById('drink-remaining').textContent = 'Rimanente: ' + Math.round(volumeIniziale - volumeConsumato) + 'g';
+            
+            // Mostra/nascondi messaggio "DRINK FINITO" in base al livello
+            if (percentageRemaining < 5) {
+                document.getElementById('drink-empty').style.opacity = '1';
+            } else {
+                document.getElementById('drink-empty').style.opacity = '0';
             }
         }
+
+        // Funzione per effettuare il polling dei dati da Arduino
+        function pollArduinoData() {
+            fetch('/get_arduino_data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.peso !== null) {
+                        handleNewWeight(data.peso);
+                    }
+                })
+                .catch(error => {
+                    console.error('Errore nel polling dei dati Arduino:', error);
+                })
+                .finally(() => {
+                    // Continua il polling ogni 500ms
+                    setTimeout(pollArduinoData, 500);
+                });
+        }
+
+        // Funzione per gestire un nuovo peso rilevato
+        function handleNewWeight(peso) {
+            // Aggiorna l'interfaccia con il nuovo peso
+            document.getElementById('ultimo-peso').textContent = peso + 'g';
+            
+            // Se è il primo peso, salvalo e basta
+            if (ultimoPeso === null) {
+                ultimoPeso = peso;
+                pesiRilevati.push({
+                    peso: peso,
+                    timestamp: new Date()
+                });
+                document.getElementById('status-message').innerHTML = 
+                    '<i class="fas fa-check-circle me-2 text-success"></i> Peso iniziale rilevato. In attesa di sorsi...';
+                document.getElementById('status-message').className = 'alert alert-success';
+                return;
+            }
+            
+            // Calcola la differenza di peso (sorso)
+            const differenzaPeso = ultimoPeso - peso;
+            
+            // Se la differenza è significativa (> 5g), considerala un sorso
+            if (differenzaPeso > 5) {
+                // Registra il sorso
+                registraSorso(differenzaPeso);
+                
+                // Aggiorna l'interfaccia
+                document.getElementById('ultimo-sorso').textContent = differenzaPeso.toFixed(1) + 'g';
+                document.getElementById('status-message').innerHTML = 
+                    '<i class="fas fa-glass-cheers me-2 text-success"></i> Sorso rilevato: ' + differenzaPeso.toFixed(1) + 'g';
+                document.getElementById('status-message').className = 'alert alert-success';
+                
+                // Aggiorna i dati
+                pesiRilevati.push({
+                    peso: peso,
+                    timestamp: new Date(),
+                    differenza: differenzaPeso
+                });
+                sorsiCalcolati.push({
+                    volume: differenzaPeso,
+                    timestamp: new Date()
+                });
+                volumeConsumato += differenzaPeso;
+                updateLiquidLevel();
+            } else if (Math.abs(differenzaPeso) > 1) {
+                // Piccola variazione di peso, aggiorna il dato
+                document.getElementById('status-message').innerHTML = 
+                    '<i class="fas fa-info-circle me-2"></i> Variazione di peso rilevata: ' + differenzaPeso.toFixed(1) + 'g';
+                document.getElementById('status-message').className = 'alert alert-info';
+            }
+            
+            // Aggiorna l'ultimo peso
+            ultimoPeso = peso;
+        }
+
+        // Funzione per registrare un sorso sul server
+        function registraSorso(volume) {
+            // Invia i dati al server in modo asincrono
+            fetch('/registra_sorso_ajax/{{ consumazione_id }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ volume: volume })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Sorso registrato con successo:', data);
+            })
+            .catch(error => {
+                console.error('Errore nella registrazione del sorso:', error);
+            });
+        }
+        
+        // Gestisci il form "Ho finito"
+        document.getElementById('finish-form').addEventListener('submit', function(e) {
+            // Disabilita il pulsante per evitare doppi click
+            const submitButton = this.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Completamento in corso...';
+        });
+        
+        // Imposta il livello iniziale e avvia il polling
+        updateLiquidLevel();
+        pollArduinoData();
     });
 </script>
 {% endblock %}
