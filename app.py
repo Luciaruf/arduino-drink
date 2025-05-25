@@ -124,8 +124,17 @@ def get_bars(city=None):
     logger.info(f"Richiesta get_bars con parametro city: {city}")
     url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
     response = requests.get(url, headers=get_airtable_headers())
+    
+    # Log della risposta completa per debug
+    logger.info(f"Risposta completa da Airtable: {response.text[:200]}...")
+    
     bars = response.json()['records']
     logger.info(f"Recuperati {len(bars)} bar totali da Airtable")
+    
+    # Log dettagliato della struttura dati dei bar
+    if len(bars) > 0:
+        logger.info(f"STRUTTURA DEI DATI - Esempio di bar: {bars[0]}")
+        logger.info(f"CAMPI DISPONIBILI: {list(bars[0]['fields'].keys())}")
     
     if city:
         # Filtra i bar per città
@@ -134,7 +143,21 @@ def get_bars(city=None):
         available_cities = set(bar['fields'].get('Città', '') for bar in bars if 'Città' in bar['fields'])
         logger.info(f"Città disponibili nei dati: {available_cities}")
         
-        filtered_bars = [bar for bar in bars if bar['fields'].get('Città') == city]
+        # Log dei primi 5 bar e delle loro città per debug
+        for i, bar in enumerate(bars[:5]):
+            logger.info(f"Bar {i+1}: ID={bar['id']}, Città={bar['fields'].get('Città', 'N/A')}")
+            logger.info(f"TUTTI I CAMPI del Bar {i+1}: {bar['fields']}")
+        
+        
+        # Rendi il filtraggio insensibile alle maiuscole/minuscole
+        city_lower = city.lower() if city else ''
+        filtered_bars = []
+        for bar in bars:
+            bar_city = bar['fields'].get('Città', '')
+            if bar_city and bar_city.lower() == city_lower:
+                filtered_bars.append(bar)
+                logger.info(f"Match trovato: Bar '{bar['fields'].get('Nome', 'N/A')}' in città '{bar_city}'")
+        
         logger.info(f"Bar filtrati per {city}: {len(filtered_bars)}")
         return filtered_bars
     return bars
@@ -1193,6 +1216,11 @@ def get_arduino_data():
         'timestamp': timestamp_dato
     })
 
+@app.route('/simulatore')
+def simulatore():
+    """Pagina per simulare l'invio di dati peso da Arduino"""
+    return render_template('simulatore.html')
+
 @app.route('/test-arduino')
 def test_arduino():
     global dato_da_arduino, timestamp_dato
@@ -1391,7 +1419,7 @@ def get_bars_by_city(city):
 
 @app.route('/nuovo_drink', methods=['GET', 'POST'])
 def nuovo_drink():
-    # Pagina unificata per inizializzare e monitorare un nuovo drink
+    # Pagina per selezionare il drink
     if 'user' not in session:
         flash('Devi effettuare il login per monitorare i tuoi drink')
         return redirect(url_for('login'))
@@ -1415,53 +1443,50 @@ def nuovo_drink():
         )
     
     # Inizializza le variabili per i template
-    citta_selezionata = None
-    bar_list = []
-    bar_selezionato = None
-    drink_list = []
-    
-    # Controlla se è stata inviata un'azione specifica dal form
-    form_action = request.form.get('form_action', 'select')
+    selected_city = None
+    bars = []
+    selected_bar_id = None
+    drinks = []
     
     # Gestione della selezione della città
-    if request.method == 'POST' and 'citta' in request.form:
-        citta_selezionata = request.form.get('citta')
-        if citta_selezionata:
-            logger.info(f"Città selezionata: {citta_selezionata}")
+    if request.method == 'POST' and 'city' in request.form:
+        selected_city = request.form.get('city')
+        if selected_city:
+            logger.info(f"Città selezionata: {selected_city}")
             # Filtra i bar per la città selezionata
-            bar_list = get_bars(citta_selezionata)
-            logger.info(f"Trovati {len(bar_list)} bar per {citta_selezionata}")
+            bars = get_bars(selected_city)
+            logger.info(f"Trovati {len(bars)} bar per {selected_city}")
     
     # Gestione della selezione del bar
-    if request.method == 'POST' and 'bar' in request.form and request.form.get('bar'):
-        bar_selezionato = request.form.get('bar')
-        citta_selezionata = request.form.get('citta')  # Mantieni la città selezionata
+    if request.method == 'POST' and 'bar_id' in request.form and request.form.get('bar_id'):
+        selected_bar_id = request.form.get('bar_id')
+        selected_city = request.form.get('city')  # Mantieni la città selezionata
         
-        if citta_selezionata:
-            bar_list = get_bars(citta_selezionata)
+        if selected_city:
+            bars = get_bars(selected_city)
         
-        if bar_selezionato:
-            logger.info(f"Bar selezionato: {bar_selezionato}")
+        if selected_bar_id:
+            logger.info(f"Bar selezionato: {selected_bar_id}")
             # Salva il bar selezionato nella sessione
-            session['bar_id'] = bar_selezionato
+            session['selected_bar_id'] = selected_bar_id
             
             # Ottieni tutti i drink prima del filtraggio
             all_drinks = get_drinks()
             # Filtra i drink per questo bar
-            drink_list = []
+            drinks = []
             for drink in all_drinks:
                 bar_list_drink = drink['fields'].get('Bar', [])
-                if bar_selezionato in bar_list_drink:
-                    drink_list.append(drink)
-            logger.info(f"Trovati {len(drink_list)} drink per il bar {bar_selezionato}")
+                if selected_bar_id in bar_list_drink:
+                    drinks.append(drink)
+            logger.info(f"Trovati {len(drinks)} drink per il bar {selected_bar_id}")
     
-    # Gestione dell'azione di start quando si preme il pulsante Inizia
-    if request.method == 'POST' and form_action == 'start':
-        logger.info(f"Form action 'start' rilevata. Form data: {request.form}")
-        
+    # Questo blocco è stato sostituito con il nuovo codice sopra per gestire 'city'
+    
+    # Gestione del form quando viene inviato
+    if request.method == 'POST' and 'drink_id' in request.form and request.form.get('drink_id'):
         # Ottieni i valori selezionati
-        drink_id = request.form.get('drink')
-        bar_id = request.form.get('bar')
+        drink_id = request.form.get('drink_id')
+        bar_id = request.form.get('bar_id')
         
         logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}")
         
@@ -1470,24 +1495,58 @@ def nuovo_drink():
             logger.warning("Mancano drink_id o bar_id")
         else:
             logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}")
-            # Avvia il monitoraggio del drink
-            session['selected_drink_id'] = drink_id
-            session['selected_bar_id'] = bar_id
-            
-            # Reindirizza alla stessa pagina ma con JavaScript abilitato per avviare il monitoraggio
-            redirect_url = url_for('nuovo_drink', start_monitoring='true')
-            logger.info(f"Reindirizzamento a: {redirect_url}")
-            return redirect(redirect_url)
+            # Reindirizza alla pagina di monitoraggio
+            return redirect(url_for('monitora_drink', drink_id=drink_id, bar_id=bar_id))
     
     return render_template(
         'nuovo_drink.html',
-        consumazione_attiva=consumazione_attiva,
-        drink_attivo=drink_attivo,
         cities=cities,
-        citta_selezionata=citta_selezionata,
-        bar_list=bar_list,
-        bar_selezionato=bar_selezionato,
-        drink_list=drink_list
+        selected_city=selected_city,
+        bars=bars,
+        selected_bar_id=selected_bar_id,
+        drinks=drinks
+    )
+
+@app.route('/monitora_drink', methods=['GET'])
+def monitora_drink():
+    # Pagina per monitorare il consumo del drink
+    if 'user' not in session:
+        flash('Devi effettuare il login per monitorare i tuoi drink', 'danger')
+        return redirect(url_for('login'))
+    
+    # Controlla se c'è già una consumazione attiva
+    consumazione_attiva = get_active_consumption()
+    consumazione_id = None
+    
+    # Ottieni i parametri dall'URL
+    drink_id = request.args.get('drink_id')
+    bar_id = request.args.get('bar_id')
+    
+    logger.info(f"Richiesta monitora_drink con drink_id={drink_id}, bar_id={bar_id}")
+    
+    # Se non ci sono parametri ma c'è una consumazione attiva, usa i suoi dati
+    if consumazione_attiva:
+        consumazione_id = consumazione_attiva['id']
+        drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
+    
+    # Verifica che ci sia un drink_id valido
+    if not drink_id:
+        flash('Nessun drink selezionato', 'danger')
+        return redirect(url_for('nuovo_drink'))
+    
+    # Ottieni i dettagli del drink
+    drink_selezionato = get_drink_by_id(drink_id)
+    
+    if not drink_selezionato:
+        flash('Drink non trovato', 'danger')
+        return redirect(url_for('nuovo_drink'))
+    
+    return render_template(
+        'monitora_drink.html',
+        drink_id=drink_id,
+        bar_id=bar_id,
+        drink_selezionato=drink_selezionato,
+        consumazione_id=consumazione_id
     )
 
 @app.route('/get_drinks_by_bar/<bar_id>', methods=['GET'])

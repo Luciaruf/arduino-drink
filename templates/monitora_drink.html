@@ -1,0 +1,625 @@
+{% extends 'base.html' %}
+
+{% block title %}Monitoraggio Drink - Arduino Drink{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-lg-8 offset-lg-2">
+            <div class="card mt-4 mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0"><i class="fas fa-cocktail me-2"></i> Monitoraggio Drink</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Messaggio di stato -->
+                    <div id="status-message" class="alert alert-info mb-3">
+                        <i class="fas fa-info-circle me-2"></i> Monitoraggio in corso...
+                    </div>
+
+                    <!-- Card per il test locale (simulazione manuale) -->
+                    <div class="card mb-4" id="test-manuale-card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-vial me-2"></i> Simulatore Manuale</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-3">
+                                <small><i class="fas fa-info-circle me-1"></i> Inserisci manualmente il peso e i sorsi</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="peso-manuale" class="form-label">Peso iniziale:</label>
+                                <div class="input-group mb-2">
+                                    <input type="number" step="5" class="form-control" id="peso-manuale" value="300" required>
+                                    <button type="button" id="btn-imposta-peso" class="btn btn-primary">Imposta</button>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3" id="sorsi-controls">
+                                <label class="form-label">Simula sorsi:</label>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <button type="button" class="btn btn-outline-primary btn-sorso" data-peso="5">Sorso piccolo (-5g)</button>
+                                    <button type="button" class="btn btn-outline-primary btn-sorso" data-peso="15">Sorso medio (-15g)</button>
+                                    <button type="button" class="btn btn-outline-primary btn-sorso" data-peso="30">Sorso grande (-30g)</button>
+                                </div>
+                            </div>
+                            
+                            <div class="alert alert-light text-center" id="peso-display">
+                                Peso attuale: <strong id="peso-attuale">0</strong>g
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Card monitoraggio peso -->
+                    <div class="card mb-4" id="monitoraggio-card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-weight me-2"></i> Monitoraggio Peso</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-7">
+                                    <div class="mb-3">
+                                        <label class="form-label">Ultimo peso rilevato:</label>
+                                        <div class="alert alert-primary py-2">
+                                            <strong id="ultimo-peso">--</strong>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Peso consumato:</label>
+                                        <div class="alert alert-info py-2">
+                                            <strong id="peso-consumato">0g</strong>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Progresso:</label>
+                                        <div class="progress" style="height: 25px;">
+                                            <div id="drink-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-5 text-center">
+                                    <div class="drink-visualization mb-3">
+                                        <div class="drink-glass">
+                                            <div id="drink-liquid" style="height: 100%;"></div>
+                                            <div id="drink-face" class="drink-face">
+                                                <div class="eyes">
+                                                    <div class="eye"></div>
+                                                    <div class="eye"></div>
+                                                </div>
+                                                <div class="mouth smile"></div>
+                                            </div>
+                                        </div>
+                                        <p id="drink-remaining" class="mt-1">Rimanente: 0g</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <canvas id="weightChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Card dettagli drink -->
+                    <div class="card mb-4" id="drink-details-card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Dettagli</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Drink:</label>
+                                        <div class="alert alert-light py-2">
+                                            <strong id="drink-detail-name">--</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Alcol:</label>
+                                        <div class="alert alert-light py-2">
+                                            <strong id="drink-detail-alcol">--</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Peso iniziale:</label>
+                                        <div class="alert alert-light py-2">
+                                            <strong id="drink-detail-peso">--</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Consumato:</label>
+                                        <div class="alert alert-light py-2">
+                                            <strong id="drink-detail-consumato">0g</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid">
+                                <button type="button" id="complete-btn" class="btn btn-success btn-lg">
+                                    <i class="fas fa-check-circle me-2"></i> Termina Consumazione
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Variabili globali
+    let selectedDrinkId = "{{ drink_id }}";
+    let selectedBarId = "{{ bar_id }}";
+    let selectedDrinkName = "{{ drink_selezionato.fields.Name if drink_selezionato else '' }}";
+    let percentualeAlcol = "{{ drink_selezionato.fields.ABV if drink_selezionato else '0' }}";
+    let consumazioneId = "{{ consumazione_id if consumazione_id else 'null' }}";
+    let pesoIniziale = 0;
+    let volumeConsumato = 0;
+    let ultimoPeso = null;
+    let pesiRilevati = [];
+    let sorsiCalcolati = [];
+    let pollingActive = false;
+    let weightChart = null;
+
+    // Inizializzazione quando il DOM è pronto
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Inizializzazione monitoraggio per drink:', selectedDrinkName);
+        
+        // Aggiorna l'interfaccia con i dettagli del drink
+        document.getElementById('drink-detail-name').textContent = selectedDrinkName;
+        document.getElementById('drink-detail-alcol').textContent = percentualeAlcol + "%";
+        
+        // Inizializza il grafico
+        initializeChart();
+        
+        // Imposta gli event listener
+        setupEventListeners();
+        
+        // Avvia il polling dei dati Arduino
+        startArduinoPolling();
+    });
+    
+    // Imposta gli event listener
+    function setupEventListeners() {
+        // Pulsante imposta peso
+        const btnImpostaPeso = document.getElementById('btn-imposta-peso');
+        if (btnImpostaPeso) {
+            btnImpostaPeso.addEventListener('click', function() {
+                const pesoInput = document.getElementById('peso-manuale');
+                const peso = parseFloat(pesoInput.value);
+                
+                if (isNaN(peso) || peso <= 0) {
+                    alert('Inserisci un peso valido maggiore di zero.');
+                    return;
+                }
+                
+                // Aggiorna il display del peso
+                document.getElementById('peso-attuale').textContent = peso;
+                
+                // Gestisci il nuovo peso
+                handleNewWeight(peso);
+            });
+        }
+        
+        // Pulsanti sorsi
+        const sorsiButtons = document.querySelectorAll('.btn-sorso');
+        sorsiButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const pesoAttuale = parseFloat(document.getElementById('peso-attuale').textContent);
+                
+                if (isNaN(pesoAttuale) || pesoAttuale <= 0) {
+                    alert('Imposta prima un peso iniziale.');
+                    return;
+                }
+                
+                const sorsoPeso = parseFloat(this.getAttribute('data-peso'));
+                const nuovoPeso = Math.max(0, pesoAttuale - sorsoPeso);
+                
+                // Aggiorna il display
+                document.getElementById('peso-attuale').textContent = nuovoPeso;
+                
+                // Gestisci il nuovo peso
+                handleNewWeight(nuovoPeso);
+            });
+        });
+        
+        // Pulsante termina
+        const completeBtn = document.getElementById('complete-btn');
+        if (completeBtn) {
+            completeBtn.addEventListener('click', function() {
+                finishConsumption();
+            });
+        }
+    }
+    
+    // Funzione per avviare il polling dei dati Arduino
+    function startArduinoPolling() {
+        if (pollingActive) return;
+        pollingActive = true;
+        pollArduinoData();
+    }
+    
+    // Funzione per il polling dei dati Arduino
+    function pollArduinoData() {
+        if (!pollingActive) return;
+        
+        fetch('/get_arduino_data')
+            .then(response => response.json())
+            .then(data => {
+                if (data.peso !== null) {
+                    handleNewWeight(data.peso);
+                }
+                setTimeout(pollArduinoData, 1000);
+            })
+            .catch(error => {
+                console.error('Errore nel polling dei dati Arduino:', error);
+                setTimeout(pollArduinoData, 5000);
+            });
+    }
+    
+    // Funzione per gestire un nuovo peso rilevato
+    function handleNewWeight(peso) {
+        console.log('Nuovo peso rilevato:', peso);
+        
+        // Aggiorna l'interfaccia con il nuovo peso
+        const pesoElement = document.getElementById('ultimo-peso');
+        if (pesoElement) {
+            pesoElement.textContent = peso + 'g';
+        }
+        
+        // Se è il primo peso, imposta come peso iniziale
+        if (pesoIniziale === 0 || !pesoIniziale) {
+            pesoIniziale = peso;
+            
+            const detailPesoElement = document.getElementById('drink-detail-peso');
+            if (detailPesoElement) {
+                detailPesoElement.textContent = pesoIniziale + 'g';
+            }
+            
+            updateStatusMessage('Peso iniziale rilevato: ' + pesoIniziale + 'g', 'success');
+            
+            // Se non abbiamo ancora una consumazione attiva, creane una
+            if (!consumazioneId || consumazioneId === 'null') {
+                createConsumption(peso);
+            }
+        }
+        
+        // Calcola quanto è stato consumato
+        if (ultimoPeso !== null && peso < ultimoPeso) {
+            // Questo è un sorso
+            const quantita = ultimoPeso - peso;
+            sorsiCalcolati.push({
+                timestamp: new Date(),
+                quantita: quantita
+            });
+            
+            console.log('Sorso rilevato:', quantita + 'g');
+        }
+        
+        // Aggiorna il peso complessivo consumato
+        volumeConsumato = Math.max(0, pesoIniziale - peso);
+        
+        const pesoConsumatoElement = document.getElementById('peso-consumato');
+        if (pesoConsumatoElement) {
+            pesoConsumatoElement.textContent = volumeConsumato + 'g';
+        }
+        
+        const detailConsumatoElement = document.getElementById('drink-detail-consumato');
+        if (detailConsumatoElement) {
+            detailConsumatoElement.textContent = volumeConsumato + 'g';
+        }
+        
+        // Aggiorna la percentuale consumata
+        const percentageConsumed = pesoIniziale > 0 ? (volumeConsumato / pesoIniziale) * 100 : 0;
+        const percentageRemaining = 100 - percentageConsumed;
+        
+        const progressElement = document.getElementById('drink-progress');
+        if (progressElement) {
+            progressElement.style.width = percentageConsumed + '%';
+            progressElement.textContent = Math.round(percentageConsumed) + '%';
+        }
+        
+        const remainingElement = document.getElementById('drink-remaining');
+        if (remainingElement) {
+            remainingElement.textContent = 'Rimanente: ' + (pesoIniziale - volumeConsumato) + 'g';
+        }
+        
+        // Aggiorna il grafico
+        updateChart(peso);
+        
+        // Aggiorna l'animazione del drink
+        const liquidElement = document.getElementById('drink-liquid');
+        if (liquidElement) {
+            liquidElement.style.height = percentageRemaining + '%';
+        }
+        
+        // Aggiorna l'espressione del drink
+        updateDrinkFace(percentageConsumed);
+        
+        // Memorizza questo peso per il prossimo confronto
+        ultimoPeso = peso;
+        
+        // Aggiungi il peso alla lista dei pesi rilevati
+        pesiRilevati.push({
+            timestamp: new Date(),
+            peso: peso
+        });
+    }
+    
+    // Funzione per creare una nuova consumazione
+    function createConsumption(peso) {
+        if (!selectedDrinkId || !selectedBarId) {
+            console.error('Impossibile creare consumazione: mancano drink_id o bar_id');
+            return;
+        }
+        
+        const data = {
+            drink_id: selectedDrinkId,
+            bar_id: selectedBarId,
+            peso_iniziale: peso
+        };
+        
+        fetch('/create_consumption', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                consumazioneId = data.consumption_id;
+                console.log('Consumazione creata con ID:', consumazioneId);
+                updateStatusMessage('Consumazione iniziata', 'success');
+            } else {
+                console.error('Errore nella creazione della consumazione:', data.error);
+                updateStatusMessage('Errore: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Errore nella creazione della consumazione:', error);
+            updateStatusMessage('Errore di comunicazione con il server', 'danger');
+        });
+    }
+    
+    // Funzione per terminare una consumazione
+    function finishConsumption() {
+        if (!consumazioneId || consumazioneId === 'null') {
+            updateStatusMessage('Nessuna consumazione attiva da terminare', 'warning');
+            return;
+        }
+        
+        // Disabilita il pulsante per evitare doppi click
+        const completeBtn = document.getElementById('complete-btn');
+        if (completeBtn) {
+            completeBtn.disabled = true;
+            completeBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Completamento in corso...';
+        }
+        
+        const data = {
+            consumption_id: consumazioneId,
+            peso_finale: ultimoPeso || 0,
+            volume_consumato: volumeConsumato,
+            sorsi: sorsiCalcolati.length
+        };
+        
+        fetch('/finish_consumption', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateStatusMessage('Consumazione completata con successo!', 'success');
+                
+                // Reindirizza alla pagina principale dopo qualche secondo
+                setTimeout(() => {
+                    window.location.href = '/dashboard';
+                }, 3000);
+            } else {
+                updateStatusMessage('Errore: ' + data.error, 'danger');
+                
+                // Riabilita il pulsante
+                if (completeBtn) {
+                    completeBtn.disabled = false;
+                    completeBtn.innerHTML = '<i class="fas fa-check-circle me-2"></i> Termina Consumazione';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Errore nel completamento della consumazione:', error);
+            updateStatusMessage('Errore di comunicazione con il server', 'danger');
+            
+            // Riabilita il pulsante
+            if (completeBtn) {
+                completeBtn.disabled = false;
+                completeBtn.innerHTML = '<i class="fas fa-check-circle me-2"></i> Termina Consumazione';
+            }
+        });
+    }
+    
+    // Funzione per inizializzare il grafico
+    function initializeChart() {
+        const ctx = document.getElementById('weightChart');
+        if (!ctx) return;
+        
+        weightChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Peso (g)',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: false
+                    }
+                }
+            }
+        });
+    }
+    
+    // Funzione per aggiornare il grafico
+    function updateChart(peso) {
+        if (!weightChart) return;
+        
+        const now = new Date();
+        const timeStr = now.getHours() + ':' + now.getMinutes() + ':' + now.getSeconds();
+        
+        // Aggiungi il nuovo punto dati
+        weightChart.data.labels.push(timeStr);
+        weightChart.data.datasets[0].data.push(peso);
+        
+        // Limita i punti visualizzati a 10 per mantenere il grafico leggibile
+        if (weightChart.data.labels.length > 10) {
+            weightChart.data.labels.shift();
+            weightChart.data.datasets[0].data.shift();
+        }
+        
+        weightChart.update();
+    }
+    
+    // Funzione per aggiornare l'espressione del drink
+    function updateDrinkFace(percentageConsumed) {
+        const face = document.querySelector('#drink-face .mouth');
+        if (!face) return;
+        
+        // Rimuovi le classi esistenti
+        face.classList.remove('smile', 'neutral', 'sad', 'very-sad');
+        
+        // Aggiungi la classe appropriata in base alla percentuale consumata
+        if (percentageConsumed < 25) {
+            face.classList.add('smile');
+        } else if (percentageConsumed < 50) {
+            face.classList.add('neutral');
+        } else if (percentageConsumed < 75) {
+            face.classList.add('sad');
+        } else {
+            face.classList.add('very-sad');
+        }
+    }
+    
+    // Funzione per aggiornare il messaggio di stato
+    function updateStatusMessage(message, type) {
+        const statusElement = document.getElementById('status-message');
+        if (!statusElement) return;
+        
+        // Rimuovi le classi di tipo esistenti
+        statusElement.classList.remove('alert-info', 'alert-success', 'alert-warning', 'alert-danger');
+        
+        // Aggiungi la classe appropriata
+        statusElement.classList.add('alert-' + type);
+        
+        // Aggiorna il messaggio
+        statusElement.innerHTML = '<i class="fas fa-info-circle me-2"></i> ' + message;
+    }
+</script>
+
+<!-- Stili aggiuntivi per l'animazione del drink -->
+<style>
+    .drink-visualization {
+        position: relative;
+        height: 200px;
+    }
+    
+    .drink-glass {
+        position: relative;
+        margin: 0 auto;
+        width: 100px;
+        height: 150px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 2px solid #ddd;
+        border-bottom-left-radius: 10px;
+        border-bottom-right-radius: 10px;
+        overflow: hidden;
+    }
+    
+    #drink-liquid {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        background-color: #ff9800;
+        transition: height 0.5s ease;
+    }
+    
+    .drink-face {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 100%;
+        height: 40px;
+        transform: translateY(-50%);
+        z-index: 1;
+    }
+    
+    .eyes {
+        display: flex;
+        justify-content: space-around;
+        margin-bottom: 10px;
+    }
+    
+    .eye {
+        width: 12px;
+        height: 12px;
+        background-color: #333;
+        border-radius: 50%;
+    }
+    
+    .mouth {
+        width: 30px;
+        height: 15px;
+        margin: 0 auto;
+        position: relative;
+    }
+    
+    .smile {
+        border-bottom: 3px solid #333;
+        border-radius: 0 0 30px 30px;
+    }
+    
+    .neutral {
+        border-top: 3px solid #333;
+    }
+    
+    .sad {
+        border-top: 3px solid #333;
+        border-radius: 30px 30px 0 0;
+    }
+    
+    .very-sad {
+        border-top: 5px solid #333;
+        border-radius: 30px 30px 0 0;
+    }
+</style>
+{% endblock %}
