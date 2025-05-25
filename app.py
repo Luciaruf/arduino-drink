@@ -58,9 +58,6 @@ TIMEZONE = pytz.timezone('Europe/Rome')
 dato_da_arduino = None
 timestamp_dato = None
 
-# Flag per indicare se siamo in modalità sviluppo (localhost)
-DEVELOPMENT_MODE = True
-
 # Endpoint semplificato per ricevere dati di peso da Arduino/script esterni
 @app.route('/arduino_peso/<float:peso>', methods=['GET'])
 def arduino_peso_direct(peso):
@@ -78,16 +75,6 @@ def arduino_peso_direct(peso):
         "status": "ok",
         "peso": peso
     })
-
-# Middleware per bypassare le verifiche di autenticazione in modalità sviluppo
-@app.before_request
-def bypass_all_auth():
-    """In modalità sviluppo, imposta automaticamente un utente fittizio"""
-    if DEVELOPMENT_MODE:
-        # Imposta automaticamente session['user'] se non esiste
-        if 'user' not in session:
-            session['user'] = 'dev_user_123'
-            print(f"[DEV] Auto-login: {session['user']}")
 
 
 # === Airtable API ===
@@ -1187,14 +1174,7 @@ def test_arduino():
                          dato=dato_da_arduino, 
                          tempo_trascorso=round(tempo_trascorso, 2))
 
-@app.route('/simulatore_arduino')
-def simulatore_arduino():
-    """Pagina per simulare i dati inviati da Arduino"""
-    if 'user' not in session:
-        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
-        return redirect(url_for('login'))
-    
-    return render_template('simulatore_arduino.html')
+# La rotta del simulatore Arduino è stata rimossa perché non necessaria
 
 @app.route('/registra_sorso_ajax/<consumazione_id>', methods=['POST'])
 def registra_sorso_ajax(consumazione_id):
