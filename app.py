@@ -59,22 +59,55 @@ dato_da_arduino = None
 timestamp_dato = None
 
 # Endpoint semplificato per ricevere dati di peso da Arduino/script esterni
+# Manteniamo il vecchio endpoint GET per retrocompatibilità
 @app.route('/arduino_peso/<float:peso>', methods=['GET'])
-def arduino_peso_direct(peso):
-    """Endpoint che aggiorna direttamente le variabili globali per il peso"""
+def arduino_peso_direct_get(peso):
+    """Endpoint che aggiorna direttamente le variabili globali per il peso (metodo GET)"""
     global dato_da_arduino, timestamp_dato
     
     # Aggiorna le variabili globali
     dato_da_arduino = peso
     timestamp_dato = time.time()
     
-    print(f"[ARDUINO] Peso aggiornato a {peso}g")
+    print(f"[ARDUINO-GET] Peso aggiornato a {peso}g")
     
     # Restituisci una conferma
     return jsonify({
         "status": "ok",
         "peso": peso
     })
+
+# Endpoint POST per ricevere dati di peso (più adatto per invio dati)
+@app.route('/arduino_peso', methods=['POST'])
+def arduino_peso_direct_post():
+    """Endpoint che riceve il peso via POST e aggiorna le variabili globali"""
+    global dato_da_arduino, timestamp_dato
+    
+    try:
+        # Accetta sia JSON che form data
+        if request.is_json:
+            data = request.get_json()
+            peso = float(data.get('peso', 0))
+        else:
+            peso = float(request.form.get('peso', 0))
+        
+        # Aggiorna le variabili globali
+        dato_da_arduino = peso
+        timestamp_dato = time.time()
+        
+        print(f"[ARDUINO-POST] Peso aggiornato a {peso}g")
+        
+        # Restituisci una conferma
+        return jsonify({
+            "status": "ok",
+            "peso": peso
+        })
+    except Exception as e:
+        print(f"[ARDUINO-ERROR] {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 400
 
 
 # === Airtable API ===
