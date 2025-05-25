@@ -153,28 +153,55 @@
                         <div id="step-1" class="fade-in">
                             <p class="lead">Seleziona il drink che vuoi consumare:</p>
                             
-                            <form id="drink-form">
+                            <form id="drink-form" method="POST" action="/nuovo_drink">
+                                <input type="hidden" name="form_action" value="select" id="form_action">
                                 <div class="mb-3">
                                     <label for="city-select" class="form-label">In quale città ti trovi?</label>
-                                    <select class="form-select" id="city-select" required>
+                                    <select class="form-select" id="city-select" name="citta" onchange="document.getElementById('form_action').value='select'; this.form.submit()" required>
                                         <option value="" selected disabled>Seleziona una città...</option>
                                         {% for city in cities %}
-                                            <option value="{{ city }}">{{ city }}</option>
+                                            <option value="{{ city }}" {% if citta_selezionata == city %}selected{% endif %}>{{ city }}</option>
                                         {% endfor %}
                                     </select>
                                 </div>
+                                
+                                {% if citta_selezionata %}
+                                <div class="mb-3">
+                                    <label for="bar-select" class="form-label">In quale locale sei?</label>
+                                    <select class="form-select" id="bar-select" name="bar" onchange="document.getElementById('form_action').value='select'; this.form.submit()" required {% if not bar_list %}disabled{% endif %}>
+                                        <option value="" selected disabled>Seleziona un locale...</option>
+                                        {% for bar in bar_list %}
+                                            <option value="{{ bar.id }}" {% if bar_selezionato == bar.id %}selected{% endif %}>{{ bar.fields.Name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                {% else %}
                                 <div class="mb-3">
                                     <label for="bar-select" class="form-label">In quale locale sei?</label>
                                     <select class="form-select" id="bar-select" required disabled>
                                         <option value="" selected disabled>Prima seleziona una città...</option>
                                     </select>
                                 </div>
+                                {% endif %}
+                                
+                                {% if bar_selezionato %}
+                                <div class="mb-3">
+                                    <label for="drink-select" class="form-label">Cosa vuoi bere?</label>
+                                    <select class="form-select" id="drink-select" name="drink" required {% if not drink_list %}disabled{% endif %}>
+                                        <option value="" selected disabled>Seleziona un drink...</option>
+                                        {% for drink in drink_list %}
+                                            <option value="{{ drink.id }}" data-alcol="{{ drink.fields.Gradazione }}">{{ drink.fields.Name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                {% else %}
                                 <div class="mb-3">
                                     <label for="drink-select" class="form-label">Cosa vuoi bere?</label>
                                     <select class="form-select" id="drink-select" required disabled>
                                         <option value="" selected disabled>Prima seleziona un bar...</option>
                                     </select>
                                 </div>
+                                {% endif %}
                                 
                                 <div class="mb-3">
                                     <div class="alert alert-info">
@@ -182,9 +209,51 @@
                                     </div>
                                 </div>
                                 
-                                <button type="submit" class="btn btn-primary w-100">
+                                <button type="button" class="btn btn-primary w-100" id="start-button">
                                     <i class="fas fa-play-circle me-2"></i> Inizia
                                 </button>
+                                <script>
+                                    // Assicuriamoci che il pulsante Inizia avvii direttamente il monitoraggio
+                                    document.getElementById('start-button').addEventListener('click', function(e) {
+                                        e.preventDefault(); // Previene l'invio del form
+                                        console.log('Pulsante Inizia cliccato');
+                                        
+                                        const drinkSelect = document.getElementById('drink-select');
+                                        const barSelect = document.getElementById('bar-select');
+                                        
+                                        // Controlla che sia stato selezionato un drink
+                                        if (!drinkSelect.value) {
+                                            alert('Seleziona un drink prima di iniziare');
+                                            return;
+                                        }
+                                        
+                                        // Ottieni i dati necessari
+                                        selectedDrinkId = drinkSelect.value;
+                                        selectedBarId = barSelect.value;
+                                        const option = drinkSelect.options[drinkSelect.selectedIndex];
+                                        selectedDrinkName = option.textContent;
+                                        percentualeAlcol = option.getAttribute('data-alcol');
+                                        
+                                        console.log('Avvio monitoraggio per:', selectedDrinkName);
+                                        
+                                        // Nascondi il form e mostra le card di monitoraggio
+                                        document.getElementById('inizializza-drink-card').style.display = 'none';
+                                        document.getElementById('monitoraggio-card').style.display = 'block';
+                                        document.getElementById('drink-details-card').style.display = 'block';
+                                        
+                                        // Aggiorna l'interfaccia con i dettagli del drink
+                                        document.getElementById('drink-name-display').textContent = selectedDrinkName;
+                                        document.getElementById('drink-detail-name').textContent = selectedDrinkName;
+                                        document.getElementById('drink-detail-alcol').textContent = percentualeAlcol + "%";
+                                        
+                                        // Avvia il polling dei dati Arduino
+                                        startArduinoPolling();
+                                        console.log('Polling avviato');
+                                        
+                                        // Aggiorna il messaggio di stato
+                                        updateStatusMessage('In attesa del peso iniziale...', 'info');
+                                    });
+                                </script>
                             </form>
                         </div>
                     </div>
@@ -325,83 +394,53 @@
         const barSelect = document.getElementById('bar-select');
         const drinkSelect = document.getElementById('drink-select');
         
-        // Event listener per la selezione della città
-        if (citySelect) {
-            console.log('Elemento citySelect trovato:', citySelect);
-            citySelect.addEventListener('change', function() {
-                console.log('Evento change sulla città rilevato. Valore selezionato:', this.value);
-                selectedCityName = this.value;
+        // Non è più necessario l'event listener per la città perché ora usiamo form submission
+        
+        // Non è più necessario l'event listener per il bar perché ora usiamo form submission
+        
+        // Controlla se è necessario avviare il monitoraggio (tramite parametro URL)
+        function checkStartMonitoring() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const startMonitoring = urlParams.get('start_monitoring');
+            
+            if (startMonitoring === 'true') {
+                console.log('Avvio automatico del monitoraggio...');
+                // Nascondi il form
+                document.getElementById('inizializza-drink-card').style.display = 'none';
                 
-                // Resetta la selezione del bar e del drink
-                barSelect.disabled = false;
-                barSelect.innerHTML = '<option value="" selected disabled>Caricamento bar...</option>';
+                // Mostra le card di monitoraggio e dettagli
+                document.getElementById('monitoraggio-card').style.display = 'block';
+                document.getElementById('drink-details-card').style.display = 'block';
                 
-                drinkSelect.disabled = true;
-                drinkSelect.innerHTML = '<option value="" selected disabled>Prima seleziona un bar...</option>';
-                
-                // Carica i bar disponibili per questa città
-                console.log(`Invio richiesta per i bar della città: ${selectedCityName}`);
-                const encodedCity = encodeURIComponent(selectedCityName);
-                const url = `/get_bars_by_city/${encodedCity}`;
-                console.log(`URL chiamata: ${url}`);
-                
-                fetch(url)
-                    .then(response => {
-                        console.log('Risposta ricevuta:', response.status);
-                        if (!response.ok) {
-                            throw new Error(`Errore HTTP: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Dati ricevuti:', data);
-                        barSelect.innerHTML = '<option value="" selected disabled>Seleziona un bar...</option>';
-                        if (data.bars && Array.isArray(data.bars)) {
-                            console.log(`Ricevuti ${data.bars.length} bar`);
-                            data.bars.forEach(bar => {
-                                const option = document.createElement('option');
-                                option.value = bar.id;
-                                option.textContent = bar.name;
-                                barSelect.appendChild(option);
-                            });
-                        } else {
-                            console.error('Formato dati non valido:', data);
-                            barSelect.innerHTML = '<option value="" selected disabled>Formato dati non valido</option>';
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Errore nel caricamento dei bar:', error);
-                        barSelect.innerHTML = '<option value="" selected disabled>Errore nel caricamento</option>';
-                    });
-            });
+                // Recupera i valori salvati nella sessione
+                {% if session.get('selected_drink_id') %}
+                    selectedDrinkId = "{{ session.get('selected_drink_id') }}";
+                    // Recupera i dettagli del drink
+                    fetch(`/get_drink_details/${selectedDrinkId}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                selectedDrinkName = data.drink_name;
+                                percentualeAlcol = data.gradazione;
+                                
+                                // Aggiorna l'interfaccia con i dettagli del drink
+                                document.getElementById('drink-name-display').textContent = selectedDrinkName;
+                                document.getElementById('drink-detail-name').textContent = selectedDrinkName;
+                                document.getElementById('drink-detail-alcol').textContent = percentualeAlcol + "%";
+                                
+                                // Avvia il polling dei dati Arduino
+                                startArduinoPolling();
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Errore nel recupero dei dettagli del drink:', error);
+                        });
+                {% endif %}
+            }
         }
         
-        // Event listener per la selezione del bar
-        if (barSelect) {
-            barSelect.addEventListener('change', function() {
-                selectedBarId = this.value;
-                drinkSelect.disabled = false;
-                drinkSelect.innerHTML = '<option value="" selected disabled>Caricamento drinks...</option>';
-                
-                // Carica i drink disponibili per questo bar
-                fetch(`/get_drinks_by_bar/${selectedBarId}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        drinkSelect.innerHTML = '<option value="" selected disabled>Seleziona un drink...</option>';
-                        data.drinks.forEach(drink => {
-                            const option = document.createElement('option');
-                            option.value = drink.id;
-                            option.setAttribute('data-alcol', drink.gradazione);
-                            option.textContent = drink.name;
-                            drinkSelect.appendChild(option);
-                        });
-                    })
-                    .catch(error => {
-                        console.error('Errore nel caricamento dei drink:', error);
-                        drinkSelect.innerHTML = '<option value="" selected disabled>Errore nel caricamento</option>';
-                    });
-            });
-        }
+        // Esegui il controllo all'avvio
+        checkStartMonitoring();
         let pesoIniziale = 0;
         let volumeConsumato = 0;
         let ultimoPeso = null;

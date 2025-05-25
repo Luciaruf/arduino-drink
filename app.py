@@ -58,6 +58,38 @@ TIMEZONE = pytz.timezone('Europe/Rome')
 dato_da_arduino = None
 timestamp_dato = None
 
+# Flag per indicare se siamo in modalità sviluppo (localhost)
+DEVELOPMENT_MODE = True
+
+# Endpoint semplificato per ricevere dati di peso da Arduino/script esterni
+@app.route('/arduino_peso/<float:peso>', methods=['GET'])
+def arduino_peso_direct(peso):
+    """Endpoint che aggiorna direttamente le variabili globali per il peso"""
+    global dato_da_arduino, timestamp_dato
+    
+    # Aggiorna le variabili globali
+    dato_da_arduino = peso
+    timestamp_dato = time.time()
+    
+    print(f"[ARDUINO] Peso aggiornato a {peso}g")
+    
+    # Restituisci una conferma
+    return jsonify({
+        "status": "ok",
+        "peso": peso
+    })
+
+# Middleware per bypassare le verifiche di autenticazione in modalità sviluppo
+@app.before_request
+def bypass_all_auth():
+    """In modalità sviluppo, imposta automaticamente un utente fittizio"""
+    if DEVELOPMENT_MODE:
+        # Imposta automaticamente session['user'] se non esiste
+        if 'user' not in session:
+            session['user'] = 'dev_user_123'
+            print(f"[DEV] Auto-login: {session['user']}")
+
+
 # === Airtable API ===
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', 'patMvTkVAFXuBTZK0.73601aeaf05c4ffb8fc1109ffc1a7aa3d8e8bf740f094bb6f980c23aecbefeb5')
 BASE_ID = 'appQZSlkfRWqALhaG'
@@ -1129,25 +1161,7 @@ def render_dashboard(user_id, bar_id):
                          perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1)
                          )
 
-@app.route('/invia_dato', methods=['POST'])
-def invia_dato():
-    global dato_da_arduino, timestamp_dato
-    
-    if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
-    
-    data = request.get_json()
-    
-    if 'peso' not in data:
-        return jsonify({"error": "Missing 'peso' field"}), 400
-    
-    try:
-        peso = float(data['peso'])
-        dato_da_arduino = peso
-        timestamp_dato = time.time()
-        return jsonify({"status": "ok", "ricevuto": peso})
-    except ValueError:
-        return jsonify({"error": "Invalid 'peso' value"}), 400
+# Il vecchio endpoint /invia_dato non è più necessario, ora usiamo /arduino_peso/<peso>
 
 @app.route('/get_arduino_data')
 def get_arduino_data():
@@ -1362,7 +1376,7 @@ def get_bars_by_city(city):
     logger.info(f"Risposta: {response}")
     return jsonify(response)
 
-@app.route('/nuovo_drink')
+@app.route('/nuovo_drink', methods=['GET', 'POST'])
 def nuovo_drink():
     # Pagina unificata per inizializzare e monitorare un nuovo drink
     if 'user' not in session:
@@ -1374,19 +1388,93 @@ def nuovo_drink():
     
     # Controlla se c'è già una consumazione attiva
     consumazione_attiva = get_active_consumption()
+    drink_attivo = None
     
     # Se c'è una consumazione attiva, recupera i dettagli del drink
     if consumazione_attiva:
         drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
         drink_attivo = get_drink_by_id(drink_id) if drink_id else None
-    else:
-        drink_attivo = None
+        return render_template(
+            'nuovo_drink.html',
+            consumazione_attiva=consumazione_attiva,
+            drink_attivo=drink_attivo,
+            cities=cities
+        )
+    
+    # Inizializza le variabili per i template
+    citta_selezionata = None
+    bar_list = []
+    bar_selezionato = None
+    drink_list = []
+    
+    # Controlla se è stata inviata un'azione specifica dal form
+    form_action = request.form.get('form_action', 'select')
+    
+    # Gestione della selezione della città
+    if request.method == 'POST' and 'citta' in request.form:
+        citta_selezionata = request.form.get('citta')
+        if citta_selezionata:
+            logger.info(f"Città selezionata: {citta_selezionata}")
+            # Filtra i bar per la città selezionata
+            bar_list = get_bars(citta_selezionata)
+            logger.info(f"Trovati {len(bar_list)} bar per {citta_selezionata}")
+    
+    # Gestione della selezione del bar
+    if request.method == 'POST' and 'bar' in request.form and request.form.get('bar'):
+        bar_selezionato = request.form.get('bar')
+        citta_selezionata = request.form.get('citta')  # Mantieni la città selezionata
+        
+        if citta_selezionata:
+            bar_list = get_bars(citta_selezionata)
+        
+        if bar_selezionato:
+            logger.info(f"Bar selezionato: {bar_selezionato}")
+            # Salva il bar selezionato nella sessione
+            session['bar_id'] = bar_selezionato
+            
+            # Ottieni tutti i drink prima del filtraggio
+            all_drinks = get_drinks()
+            # Filtra i drink per questo bar
+            drink_list = []
+            for drink in all_drinks:
+                bar_list_drink = drink['fields'].get('Bar', [])
+                if bar_selezionato in bar_list_drink:
+                    drink_list.append(drink)
+            logger.info(f"Trovati {len(drink_list)} drink per il bar {bar_selezionato}")
+    
+    # Gestione dell'azione di start quando si preme il pulsante Inizia
+    if request.method == 'POST' and form_action == 'start':
+        logger.info(f"Form action 'start' rilevata. Form data: {request.form}")
+        
+        # Ottieni i valori selezionati
+        drink_id = request.form.get('drink')
+        bar_id = request.form.get('bar')
+        
+        logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}")
+        
+        if not drink_id or not bar_id:
+            flash('Seleziona un drink e un bar prima di iniziare', 'danger')
+            logger.warning("Mancano drink_id o bar_id")
+        else:
+            logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}")
+            # Avvia il monitoraggio del drink
+            session['selected_drink_id'] = drink_id
+            session['selected_bar_id'] = bar_id
+            
+            # Reindirizza alla stessa pagina ma con JavaScript abilitato per avviare il monitoraggio
+            redirect_url = url_for('nuovo_drink', start_monitoring='true')
+            logger.info(f"Reindirizzamento a: {redirect_url}")
+            return redirect(redirect_url)
     
     return render_template(
         'nuovo_drink.html',
         consumazione_attiva=consumazione_attiva,
         drink_attivo=drink_attivo,
-        cities=cities
+        cities=cities,
+        citta_selezionata=citta_selezionata,
+        bar_list=bar_list,
+        bar_selezionato=bar_selezionato,
+        drink_list=drink_list
     )
 
 @app.route('/get_drinks_by_bar/<bar_id>', methods=['GET'])
@@ -1419,6 +1507,23 @@ def get_drinks_by_bar(bar_id):
     } for drink in bar_drinks]
     
     return jsonify({'drinks': formatted_drinks})
+
+@app.route('/get_drink_details/<drink_id>', methods=['GET'])
+def get_drink_details(drink_id):
+    """Endpoint API per ottenere i dettagli di un drink specifico"""
+    if 'user' not in session:
+        return jsonify({'success': False, 'error': 'Non autorizzato'}), 401
+    
+    drink = get_drink_by_id(drink_id)
+    if not drink:
+        return jsonify({'success': False, 'error': 'Drink non trovato'})
+    
+    return jsonify({
+        'success': True,
+        'drink_name': drink['fields'].get('Name', 'Sconosciuto'),
+        'gradazione': drink['fields'].get('Gradazione', '0'),
+        'id': drink['id']
+    })
 
 @app.route('/create_consumption', methods=['POST'])
 def create_consumption():
