@@ -1240,32 +1240,220 @@ def test_arduino():
 @app.route('/registra_sorso_ajax/<consumazione_id>', methods=['POST'])
 def registra_sorso_ajax(consumazione_id):
     """Endpoint per registrare un sorso via AJAX"""
+    print(f"DEBUG - Ricevuta richiesta per registrare sorso per consumazione {consumazione_id}")
+    
     if 'user' not in session:
+        print("DEBUG - Utente non autenticato")
         return jsonify({'success': False, 'error': 'Utente non autenticato'})
     
     try:
         data = request.get_json()
         volume = float(data.get('volume', 0))
+        print(f"DEBUG - Volume ricevuto: {volume}g")
         
         if volume <= 0:
+            print("DEBUG - Volume non valido")
             return jsonify({'success': False, 'error': 'Volume non valido'})
         
         # Registra il sorso
+        print(f"DEBUG - Chiamata a registra_sorso con consumazione_id={consumazione_id}, volume={volume}")
         sorso = registra_sorso(consumazione_id, volume)
         
         if isinstance(sorso, dict) and 'error' in sorso:
-            # Errore nella registrazione del sorso
+            print(f"DEBUG - Errore nella registrazione del sorso: {sorso['error']}")
             return jsonify({'success': False, 'error': sorso['error']})
+        
+        # Recupera la lista aggiornata dei sorsi
+        print("DEBUG - Recupero lista aggiornata dei sorsi")
+        sorsi = get_sorsi_by_consumazione(consumazione_id)
+        print(f"DEBUG - Trovati {len(sorsi)} sorsi")
         
         return jsonify({
             'success': True,
             'sorso_id': sorso['id'] if sorso else None,
             'volume': volume,
-            'bac': sorso['fields'].get('BAC Temporaneo', 0) if sorso and 'fields' in sorso else 0
+            'bac': sorso['fields'].get('BAC Temporaneo', 0) if sorso and 'fields' in sorso else 0,
+            'sorsi': sorsi
         })
         
     except Exception as e:
+        print(f"DEBUG - Errore durante la registrazione del sorso: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
+
+def registra_sorso(consumazione_id, volume):
+    try:
+        print(f"DEBUG - Inizio registrazione sorso per consumazione {consumazione_id}")
+        # Recupera i dati necessari
+        consumazione = get_consumazione_by_id(consumazione_id)
+        if not consumazione:
+            print(f"DEBUG - Consumazione {consumazione_id} non trovata")
+            return None
+        
+        # Verifica che il volume totale consumato non superi il volume del drink
+        volume_drink = float(consumazione['fields']['Peso (g)'])
+        sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
+        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi_registrati) if sorsi_registrati else 0
+        
+        print(f"DEBUG - Volume drink: {volume_drink}g, Volume consumato: {volume_consumato}g, Nuovo sorso: {volume}g")
+        
+        # Controlla se il nuovo sorso supererebbe il volume totale del drink
+        if volume_consumato + float(volume) > volume_drink:
+            print(f"DEBUG - Volume richiesto {volume}g supera il volume rimanente {volume_drink - volume_consumato}g")
+            return {'error': 'volume_exceeded', 'remaining': volume_drink - volume_consumato}
+        
+        user_id = consumazione['fields']['User'][0]
+        user = get_user_by_id(user_id)
+        if not user:
+            print(f"DEBUG - Utente {user_id} non trovato")
+            return None
+        
+        drink_id = consumazione['fields']['Drink'][0]
+        drink = get_drink_by_id(drink_id)
+        if not drink:
+            print(f"DEBUG - Drink {drink_id} non trovato")
+            return None
+        
+        # Dati per il calcolo
+        peso_utente = user['fields'].get('Peso', 70)
+        genere = user['fields'].get('Genere', 'M').lower()
+        gradazione = drink['fields'].get('Gradazione', 0)
+        email_utente = user['fields'].get('Email', '')
+        
+        print(f"DEBUG - Dati utente: peso={peso_utente}kg, genere={genere}, gradazione={gradazione}%")
+        
+        # Usa l'ora corrente per il nuovo sorso
+        try:
+            ora_inizio = datetime.now(TIMEZONE)
+            ora_fine = ora_inizio + timedelta(minutes=1)
+        except Exception as e:
+            print(f"DEBUG - Errore nel calcolo delle date: {str(e)}")
+            return None
+
+        # Calcola il BAC per il nuovo sorso
+        try:
+            bac_sorso = calcola_tasso_alcolemico_widmark(
+                peso=float(peso_utente),
+                genere=genere,
+                volume=float(volume),
+                gradazione=float(gradazione),
+                stomaco=consumazione['fields'].get('Stomaco', 'Pieno').lower(),
+                ora_inizio=ora_inizio.strftime('%H:%M'),
+                ora_fine=ora_fine.strftime('%H:%M')
+            )
+            print(f"DEBUG - BAC calcolato per il sorso: {bac_sorso} g/L")
+        except Exception as e:
+            print(f"DEBUG - Errore nel calcolo del BAC: {str(e)}")
+            return None
+
+        # Ottieni l'ultimo BAC cumulativo dalla sessione
+        session_bac_key = 'bac_cumulativo_sessione'
+        bac_sessione = session.get(session_bac_key, 0.0)
+        ultima_ora_sessione = session.get('ultima_ora_bac_sessione')
+        print(f"DEBUG - BAC sessione precedente: {bac_sessione} g/L")
+
+        # Calcola il BAC metabolizzato
+        if ultima_ora_sessione:
+            try:
+                ultima_ora = datetime.fromisoformat(ultima_ora_sessione)
+                tempo_trascorso = (ora_inizio - ultima_ora).total_seconds() / 3600
+                bac_metabolizzato = calcola_alcol_metabolizzato(bac_sessione, tempo_trascorso)
+                print(f"DEBUG - BAC metabolizzato: {bac_metabolizzato} g/L")
+            except Exception as e:
+                print(f"DEBUG - Errore nel calcolo del BAC metabolizzato: {str(e)}")
+                bac_metabolizzato = 0
+        else:
+            bac_metabolizzato = 0
+
+        # Recupera tutti i sorsi dell'utente per la giornata corrente
+        sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
+        print(f"DEBUG - Trovati {len(sorsi_giornalieri)} sorsi giornalieri")
+
+        # Calcola il BAC totale
+        if not sorsi_giornalieri:
+            bac_totale = bac_metabolizzato + bac_sorso
+        else:
+            ultimo_sorso = None
+            min_diff = float('inf')
+            
+            for sorso in sorsi_giornalieri:
+                if 'fields' in sorso and 'Ora fine' in sorso['fields']:
+                    ora_fine_sorso = datetime.fromisoformat(sorso['fields']['Ora fine'].replace('Z', '+00:00'))
+                    ora_fine_sorso = ora_fine_sorso.astimezone(TIMEZONE)
+                    diff = abs((ora_inizio - ora_fine_sorso).total_seconds())
+                    
+                    if diff < min_diff:
+                        min_diff = diff
+                        ultimo_sorso = sorso
+            
+            if ultimo_sorso:
+                bac_precedente = float(ultimo_sorso['fields'].get('BAC Temporaneo', 0.0))
+                ora_fine_ultimo = datetime.fromisoformat(ultimo_sorso['fields']['Ora fine'].replace('Z', '+00:00'))
+                ora_fine_ultimo = ora_fine_ultimo.astimezone(TIMEZONE)
+                tempo_trascorso = (ora_inizio - ora_fine_ultimo).total_seconds() / 3600
+                bac_vecchio = calcola_alcol_metabolizzato(bac_precedente, tempo_trascorso)
+                bac_totale = max(bac_vecchio, bac_metabolizzato) + bac_sorso
+                print(f"DEBUG - BAC calcolato: precedente={bac_precedente}, metabolizzato={bac_vecchio}, sessione={bac_metabolizzato}, nuovo sorso={bac_sorso}, totale={bac_totale}")
+            else:
+                bac_totale = bac_metabolizzato + bac_sorso
+
+        # Limita il BAC a un valore massimo ragionevole
+        MAX_BAC = 4.0
+        if bac_totale > MAX_BAC:
+            print(f"DEBUG - BAC {bac_totale} g/L eccede il limite massimo, limitato a {MAX_BAC} g/L")
+            bac_totale = MAX_BAC
+        
+        # Aggiorna il BAC di sessione e l'orario
+        session[session_bac_key] = bac_totale
+        session['ultima_ora_bac_sessione'] = ora_fine.isoformat()
+        
+        # Registra il sorso in Airtable
+        url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+        
+        # Ottieni un nuovo ID incrementale per il sorso
+        last_id = 0
+        sorsi_esistenti = get_sorsi_by_consumazione(consumazione_id)
+        if sorsi_esistenti:
+            for sorso in sorsi_esistenti:
+                if 'fields' in sorso and 'Id' in sorso['fields']:
+                    sorso_id = int(sorso['fields']['Id'])
+                    if sorso_id > last_id:
+                        last_id = sorso_id
+        
+        new_id = last_id + 1
+        print(f"DEBUG - Nuovo ID sorso: {new_id}")
+        
+        data = {
+            'records': [{
+                'fields': {
+                    'Consumazioni Id': [consumazione_id],
+                    'Volume (g)': volume,
+                    'Email': email_utente,
+                    'BAC Temporaneo': round(bac_totale, 3),
+                    'Ora inizio': ora_inizio.isoformat(),
+                    'Ora fine': ora_fine.isoformat()
+                }
+            }]
+        }
+        
+        print(f"DEBUG - Invio dati a Airtable: {data}")
+        response = requests.post(url, headers=get_airtable_headers(), json=data)
+        
+        if response.status_code != 200:
+            print(f"DEBUG - Errore Airtable - Status: {response.status_code}, Response: {response.text}")
+            return None
+        
+        # Otteniamo il record creato
+        created_record = response.json()['records'][0]
+        print(f"DEBUG - Record creato in Airtable: {created_record}")
+        
+        # Salviamo anche in sessione come backup per la visualizzazione
+        save_sorso_to_session(consumazione_id, created_record)
+            
+        return created_record
+        
+    except Exception as e:
+        print(f"DEBUG - Errore durante la registrazione del sorso: {str(e)}")
+        return None
 
 # Funzione di utilità interna per verificare la consumazione attiva
 def get_active_consumption():
@@ -1791,183 +1979,6 @@ def get_sorsi_giornalieri(email, consumazione_id=None):
         print(f"Errore nel recupero dei sorsi giornalieri: {str(e)}")
         return []
 
-def registra_sorso(consumazione_id, volume):
-    try:
-        # Recupera i dati necessari
-        consumazione = get_consumazione_by_id(consumazione_id)
-        if not consumazione:
-            return None
-        
-        # Verifica che il volume totale consumato non superi il volume del drink
-        volume_drink = float(consumazione['fields']['Peso (g)'])
-        sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
-        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi_registrati) if sorsi_registrati else 0
-        
-        # Controlla se il nuovo sorso supererebbe il volume totale del drink
-        if volume_consumato + float(volume) > volume_drink:
-            print(f"Errore: volume richiesto {volume}g, ma rimangono solo {volume_drink - volume_consumato}g")
-            # Qui non restituiamo None per permettere alla funzione chiamante di gestire l'errore
-            # Creando un dizionario fittizio con un campo 'error'
-            return {'error': 'volume_exceeded', 'remaining': volume_drink - volume_consumato}
-        
-        user_id = consumazione['fields']['User'][0]
-        user = get_user_by_id(user_id)
-        if not user:
-            return None
-        
-        drink_id = consumazione['fields']['Drink'][0]
-        drink = get_drink_by_id(drink_id)
-        if not drink:
-            return None
-        
-        # Dati per il calcolo
-        # Accesso sicuro ai campi dell'utente e del drink
-        peso_utente = user['fields'].get('Peso', 70)  # Valore di default se manca
-        genere = user['fields'].get('Genere', 'M').lower()
-        gradazione = drink['fields'].get('Gradazione', 0)
-        email_utente = user['fields'].get('Email', '')
-        
-        # Recupera tutti i sorsi dell'utente per la giornata corrente
-        sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
-        
-        # Usa l'ora corrente per il nuovo sorso
-        try:
-            ora_inizio = datetime.now(TIMEZONE)
-            ora_fine = ora_inizio + timedelta(minutes=1)
-        except Exception as e:
-            print(f"Errore nel calcolo delle date: {str(e)}")
-            return None
-
-        # Calcola il BAC per il nuovo sorso usando il volume del sorso
-        try:
-            bac_sorso = calcola_tasso_alcolemico_widmark(
-                peso=float(peso_utente),
-                genere=genere,
-                volume=float(volume),  # Usa il volume del sorso passato come parametro
-                gradazione=float(gradazione),
-                stomaco=consumazione['fields'].get('Stomaco', 'Pieno').lower(),
-                ora_inizio=ora_inizio.strftime('%H:%M'),
-                ora_fine=ora_fine.strftime('%H:%M')
-            )
-        except Exception as e:
-            print(f"Errore nel calcolo del BAC: {str(e)}")
-            return None
-
-        # Ottieni l'ultimo BAC cumulativo dalla sessione (questo mantiene la continuità tra i drink)
-        session_bac_key = 'bac_cumulativo_sessione'
-        bac_sessione = session.get(session_bac_key, 0.0)
-        ultima_ora_sessione = session.get('ultima_ora_bac_sessione')
-        print(f"DEBUG: BAC sessione precedente = {bac_sessione} g/L")
-        
-        # Se esiste un BAC di sessione, calcola il metabolismo dall'ultimo sorso
-        if bac_sessione > 0 and ultima_ora_sessione:
-            try:
-                ultima_ora = datetime.fromisoformat(ultima_ora_sessione)
-                tempo_trascorso = (ora_inizio - ultima_ora).total_seconds() / 3600
-                # Non utilizzare valori negativi di tempo
-                tempo_trascorso = max(0, tempo_trascorso)
-                bac_metabolizzato = calcola_alcol_metabolizzato(bac_sessione, tempo_trascorso)
-                print(f"DEBUG: BAC metabolizzato da {bac_sessione} a {bac_metabolizzato} in {tempo_trascorso} ore")
-            except Exception as e:
-                print(f"Errore nel calcolo del BAC metabolizzato dalla sessione: {str(e)}")
-                bac_metabolizzato = bac_sessione
-        else:
-            bac_metabolizzato = 0.0
-            
-        # Se non ci sono sorsi precedenti per questo drink, usa il BAC metabolizzato dalla sessione + il nuovo sorso
-        if not sorsi_giornalieri:
-            bac_totale = bac_metabolizzato + bac_sorso
-        else:
-            # Trova il sorso con l'ora di fine più vicina all'ora di inizio del nuovo sorso
-            ultimo_sorso = None
-            min_diff = float('inf')
-            
-            for sorso in sorsi_giornalieri:
-                if 'fields' in sorso and 'Ora fine' in sorso['fields']:
-                    ora_fine_sorso = datetime.fromisoformat(sorso['fields']['Ora fine'].replace('Z', '+00:00'))
-                    ora_fine_sorso = ora_fine_sorso.astimezone(TIMEZONE)
-                    diff = abs((ora_inizio - ora_fine_sorso).total_seconds())
-                    
-                    if diff < min_diff:
-                        min_diff = diff
-                        ultimo_sorso = sorso
-            
-            if ultimo_sorso:
-                bac_precedente = float(ultimo_sorso['fields'].get('BAC Temporaneo', 0.0))
-                
-                # Calcola il tempo trascorso dall'ultimo sorso
-                ora_fine_ultimo = datetime.fromisoformat(ultimo_sorso['fields']['Ora fine'].replace('Z', '+00:00'))
-                ora_fine_ultimo = ora_fine_ultimo.astimezone(TIMEZONE)
-                tempo_trascorso = (ora_inizio - ora_fine_ultimo).total_seconds() / 3600
-                
-                # Calcola l'alcol metabolizzato nel tempo trascorso
-                bac_vecchio = calcola_alcol_metabolizzato(bac_precedente, tempo_trascorso)
-                
-                # Il BAC totale è: il massimo tra BAC precedente metabolizzato e BAC sessione + BAC nuovo sorso
-                # Usiamo il massimo per evitare di perdere traccia del BAC se cambiamo drink
-                bac_totale = max(bac_vecchio, bac_metabolizzato) + bac_sorso
-                
-                print(f"DEBUG BAC: precedente={bac_precedente}, metabolizzato={bac_vecchio}, sessione={bac_metabolizzato}, nuovo sorso={bac_sorso}, totale={bac_totale}")
-            else:
-                bac_totale = bac_metabolizzato + bac_sorso
-                
-        # Limita il BAC a un valore massimo ragionevole
-        MAX_BAC = 4.0  # g/L, valore massimo plausibile per un essere umano
-        if bac_totale > MAX_BAC:
-            print(f"ATTENZIONE: BAC calcolato {bac_totale} g/L eccede il limite massimo, limitato a {MAX_BAC} g/L")
-            bac_totale = MAX_BAC
-        
-        # Aggiorna il BAC di sessione e l'orario
-        session[session_bac_key] = bac_totale
-        session['ultima_ora_bac_sessione'] = ora_fine.isoformat()
-        
-        # Registra il sorso in Airtable
-        url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
-        
-        # Ottieni un nuovo ID incrementale per il sorso
-        last_id = 0
-        sorsi_esistenti = get_sorsi_by_consumazione(consumazione_id)
-        if sorsi_esistenti:
-            for sorso in sorsi_esistenti:
-                if 'fields' in sorso and 'Id' in sorso['fields']:
-                    sorso_id = int(sorso['fields']['Id'])
-                    if sorso_id > last_id:
-                        last_id = sorso_id
-        
-        new_id = last_id + 1
-        
-        data = {
-            'records': [{
-                'fields': {
-                    'Id': new_id,
-                    'Consumazioni Id': [consumazione_id],
-                    'Volume (g)': volume,
-                    'Email': email_utente,
-                    'BAC Temporaneo': round(bac_totale, 3),
-                    'Ora inizio': ora_inizio.isoformat(),
-                    'Ora fine': ora_fine.isoformat()
-                }
-            }]
-        }
-        
-        response = requests.post(url, headers=get_airtable_headers(), json=data)
-        
-        if response.status_code != 200:
-            print(f"Errore Airtable - Status: {response.status_code}")
-            return None
-        
-        # Otteniamo il record creato
-        created_record = response.json()['records'][0]
-        
-        # Salviamo anche in sessione come backup per la visualizzazione
-        save_sorso_to_session(consumazione_id, created_record)
-            
-        return created_record
-        
-    except Exception as e:
-        print(f"Errore durante la registrazione del sorso: {str(e)}")
-        return None
-
 def get_game_data(user_id):
     """Recupera i dati di gioco dell'utente da Airtable"""
     url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
@@ -2328,5 +2339,6 @@ def drink_master():
                            bac_corrente=bac_corrente,
                            interpretazione_bac=interpretazione_bac)
 
+
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8080, debug=True)
+    app.run(debug=True)

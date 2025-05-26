@@ -576,6 +576,9 @@
     function registraSorso(consumazioneId, volume) {
         const data = { volume: volume };
         
+        // Mostra un messaggio di caricamento
+        updateStatusMessage('Registrazione sorso in corso...', 'info');
+        
         fetch(`/registra_sorso_ajax/${consumazioneId}`, {
             method: 'POST',
             headers: {
@@ -587,10 +590,10 @@
         .then(data => {
             if (data.success) {
                 console.log('Sorso registrato con successo:', data);
-                // Puoi aggiornare l'UI qui se necessario, ad esempio mostrando il BAC temporaneo
+                // Aggiorna l'UI con il BAC e altri dettagli
+                updateStatusMessage(`Sorso registrato! BAC: ${data.bac} g/L`, 'success');
             } else {
                 console.error('Errore nella registrazione del sorso:', data.error);
-                // Gestisci l'errore (es. mostrare un messaggio all'utente)
                 updateStatusMessage('Errore nella registrazione del sorso: ' + data.error, 'danger');
             }
         })
