@@ -802,23 +802,10 @@ def get_all_consumazioni():
     print(f"ERRORE GET_ALL_CONSUMAZIONI: {response.status_code}")
     return []
 
-@app.route('/dashboard')
-def dashboard():
-    if 'user' not in session:
-        flash('Devi essere loggato')
-        return redirect(url_for('login'))
-    
-    user_id = session['user']
-    bar_id = session.get('bar_id')
-    
-    # Usa il template originale per la dashboard specifica del bar
-    return render_dashboard(user_id, bar_id)
-
 @app.route('/world')
 def world():
-    """Pagina World con classifiche globali e statistiche"""
     if 'user' not in session:
-        flash('Devi essere loggato')
+        flash('Devi effettuare il login per accedere a questa pagina', 'warning')
         return redirect(url_for('login'))
     
     # Valori predefiniti in caso di errore
@@ -955,257 +942,6 @@ def world():
                           perc_esiti_positivi_utente=perc_esiti_positivi_utente,
                           drink_preferito_utente=drink_preferito_utente)
 
-def render_dashboard(user_id, bar_id):
-    """Funzione helper per renderizzare la dashboard originale"""
-    # Codice originale della funzione dashboard
-
-    drinks_all = get_drinks() # Per risolvere i nomi dei drink
-    bars_all = get_bars()     # Per risolvere i nomi dei bar
-
-    consumazioni_utente_dettagliate = []
-    raw_consumazioni_utente = get_user_consumazioni(user_id=user_id, bar_id=bar_id if bar_id else None)
-
-    for cons_fields in raw_consumazioni_utente:
-        cons = cons_fields.get('fields', {})
-        created_time_str = cons_fields.get('createdTime')
-
-        # Risolvi nomi
-        drink_id_list = cons.get('Drink', [])
-        bar_id_list = cons.get('Bar', [])
-        
-        drink_name = 'N/D'
-        if drink_id_list:
-            drink_info = next((d['fields'].get('Name', 'N/D') for d in drinks_all if d['id'] == drink_id_list[0]), 'N/D')
-            drink_name = drink_info
-
-        bar_name = 'N/D'
-        if bar_id_list:
-            bar_info = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_list[0]), 'N/D')
-            bar_name = bar_info
-        
-        # Formattazione timestamp (dal campo 'timestamp' che abbiamo aggiunto)
-        timestamp_consumazione_str = cons.get('Time')
-        display_timestamp = 'N/D'
-        if timestamp_consumazione_str:
-            try:
-                dt_obj = datetime.fromisoformat(timestamp_consumazione_str.replace('Z', '+00:00'))
-                display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
-            except ValueError:
-                 # Se il formato non è esattamente ISO o manca Z, prova createdTime da Airtable
-                 if created_time_str:
-                    try:
-                        dt_obj = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
-                        display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
-                    except ValueError:
-                        display_timestamp = 'Timestamp invalido'                 
-                 else:
-                    display_timestamp = 'Timestamp mancante'
-
-        consumazioni_utente_dettagliate.append({
-            'drink_name': drink_name,
-            'bar_name': bar_name,
-            'timestamp': display_timestamp,
-            'peso_cocktail': cons.get('Peso (g)', 'N/D'),
-            'tasso': cons.get('Tasso Calcolato (g/L)', 'N/D'),
-            'esito': cons.get('Risultato', 'N/D'),
-            'stomaco': cons.get('Stomaco', 'N/D'),
-            'id': cons_fields.get('id')
-        })
-
-    # La logica per user_drinks (aggregato) e classifica può rimanere o essere adattata
-    # Per ora la commento se il template si concentrerà sui dettagli
-
-    if not bar_id:
-        # Statistiche globali (la classifica generale potrebbe ancora essere utile)
-        # consumazioni = get_user_consumazioni(user_id) # Già prese come raw_consumazioni_utente
-        all_consumazioni_altri_utenti = get_user_consumazioni(None) # Per classifica generale
-        # drinks = get_drinks() # Già prese come drinks_all
-        # bars = get_bars()     # Già prese come bars_all
-        # print("DEBUG - consumazioni trovate:", consumazioni)
-        # print("DEBUG - all_consumazioni:", all_consumazioni_altri_utenti)
-        # print("DEBUG - drinks:", drinks_all)
-        # print("DEBUG - bars:", bars_all)
-
-        # Raggruppa per bar e drink (user_drinks esistente)
-        user_drinks_aggregated = {}
-        for cons_fields in raw_consumazioni_utente: # Usa quelle già filtrate per l'utente
-            cons = cons_fields.get('fields', {})
-            if 'Bar' not in cons or not cons['Bar'] or 'Drink' not in cons or not cons['Drink']:
-                continue
-            # Nomi già risolti prima, potremmo riutilizzare bar_name e drink_name da lì se li avessimo strutturati
-            # Ma per ora rifacciamo il lookup per coerenza con il codice esistente di questa sezione
-            bar_id_cons = cons['Bar'][0]
-            drink_id_cons = cons['Drink'][0]
-            bar = next((b for b in bars_all if b['id'] == bar_id_cons), None)
-            drink = next((d for d in drinks_all if d['id'] == drink_id_cons), None)
-            _bar_name = bar['fields']['Name'] if bar else 'Bar Sconosciuto'
-            _drink_name = drink['fields']['Name'] if drink else 'Drink Sconosciuto'
-            key = f"{_bar_name} - {_drink_name}"
-            user_drinks_aggregated[key] = user_drinks_aggregated.get(key, 0) + 1
-        user_drinks_list_aggregated = [
-            {'nome': k, 'conteggio': v}
-            for k, v in user_drinks_aggregated.items()
-        ]
-
-        # Classifica generale su tutti i bar
-        user_counts = {}
-        for cons_fields in all_consumazioni_altri_utenti:
-            cons = cons_fields.get('fields', {})
-            if 'User' not in cons or not cons['User']:
-                continue
-            uid = cons['User'][0]
-            # Evitiamo di chiamare get_user_by_id per ogni consumazione per efficienza se possibile
-            # Airtable non fornisce facilmente i dati utente linkati direttamente in modo aggregabile
-            # Per una classifica reale, l'ideale sarebbe aggregare in Airtable o avere un DB separato
-            # Qui simuliamo cercando l'email, ma non è efficiente per molti utenti/consumazioni.
-            # Consideriamo un approccio semplificato per la classifica per ora.
-            # La logica esistente chiama get_user_by_id, la manterrò ma con un commento.
-            user = get_user_by_id(uid) # Molto inefficiente per classifiche grandi
-            user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else f'Utente {uid[:5]}...'
-            user_counts[user_email] = user_counts.get(user_email, 0) + 1
-        classifica_generale = [
-            {'nome': email, 'conteggio': count}
-            for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
-        ][:10]
-
-        # STATISTICHE UTENTE
-        num_consumazioni_utente = len(raw_consumazioni_utente)
-        tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
-                        for c in raw_consumazioni_utente 
-                        if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
-        tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
-        
-        esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
-        perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
-        
-        drink_preferito_utente = "N/A"
-        if user_drinks_list_aggregated: # user_drinks_list_aggregated è già calcolato per l'utente
-            drink_preferito_utente = max(user_drinks_list_aggregated, key=lambda x: x['conteggio'])['nome']
-
-        # STATISTICHE GENERALI (solo se in dashboard globale)
-        bar_preferito_utente = "N/A"
-        num_consumazioni_totali_sistema = 0
-        drink_popolare_sistema = "N/A"
-        bar_popolare_sistema = "N/A"
-
-        if not bar_id:
-            # Bar preferito dall'utente (conteggio consumazioni per bar per l'utente loggato)
-            consumi_utente_per_bar = {}
-            for cons_fields in raw_consumazioni_utente:
-                cons_data = cons_fields.get('fields', {})
-                bar_ids_list = cons_data.get('Bar', [])
-                if bar_ids_list:
-                    bar_id_cons = bar_ids_list[0]
-                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
-                    consumi_utente_per_bar[bar_name] = consumi_utente_per_bar.get(bar_name, 0) + 1
-            if consumi_utente_per_bar:
-                bar_preferito_utente = max(consumi_utente_per_bar, key=consumi_utente_per_bar.get)
-
-            # Statistiche di sistema (usano all_consumazioni_altri_utenti che sono TUTTE le consumazioni)
-            num_consumazioni_totali_sistema = len(all_consumazioni_altri_utenti)
-
-            conteggio_drink_sistema = {}
-            conteggio_bar_sistema = {}
-            for cons_fields in all_consumazioni_altri_utenti:
-                cons_data = cons_fields.get('fields', {})
-                drink_ids_list = cons_data.get('Drink', [])
-                bar_ids_list = cons_data.get('Bar', [])
-                if drink_ids_list:
-                    drink_id_cons = drink_ids_list[0]
-                    drink_name = next((d['fields'].get('Name', 'N/D') for d in drinks_all if d['id'] == drink_id_cons), 'N/D')
-                    conteggio_drink_sistema[drink_name] = conteggio_drink_sistema.get(drink_name, 0) + 1
-                if bar_ids_list:
-                    bar_id_cons = bar_ids_list[0]
-                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
-                    conteggio_bar_sistema[bar_name] = conteggio_bar_sistema.get(bar_name, 0) + 1
-            
-            if conteggio_drink_sistema:
-                drink_popolare_sistema = max(conteggio_drink_sistema, key=conteggio_drink_sistema.get)
-            if conteggio_bar_sistema:
-                bar_popolare_sistema = max(conteggio_bar_sistema, key=conteggio_bar_sistema.get)
-            
-            return render_template('dashboard.html',
-                                 bar=None, 
-                                 consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                                 user_drinks_aggregati=user_drinks_list_aggregated, 
-                                 classifica=classifica_generale,
-                                 # Nuove statistiche utente
-                                 num_consumazioni_utente=num_consumazioni_utente,
-                                 tasso_medio_utente=round(tasso_medio_utente, 2),
-                                 drink_preferito_utente=drink_preferito_utente,
-                                 bar_preferito_utente=bar_preferito_utente, # Solo per globale
-                                 perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1),
-                                 # Nuove statistiche sistema (solo per globale)
-                                 num_consumazioni_totali_sistema=num_consumazioni_totali_sistema,
-                                 drink_popolare_sistema=drink_popolare_sistema,
-                                 bar_popolare_sistema=bar_popolare_sistema
-                                 )
-
-    # Statistiche per bar selezionato
-    # raw_consumazioni_utente sono già filtrate per bar_id se presente
-    # drinks = get_drinks(bar_id) # drinks_all già disponibili e filtrati se necessario
-    
-    # user_drinks aggregati per il bar specifico
-    drink_counts_specific_bar = {}
-    for cons_fields in raw_consumazioni_utente: # Già filtrate per utente e bar
-        cons = cons_fields.get('fields', {})
-        if 'Drink' not in cons or not cons['Drink']:
-            continue
-        drink_id_cons = cons['Drink'][0]
-        drink = next((d for d in drinks_all if d['id'] == drink_id_cons), None)
-        _drink_name = drink['fields']['Name'] if drink and 'fields' in drink and 'Name' in drink['fields'] else 'Drink Sconosciuto'
-        drink_counts_specific_bar[_drink_name] = drink_counts_specific_bar.get(_drink_name, 0) + 1
-    user_drinks_list_specific_bar = [
-        {'nome': k, 'conteggio': v}
-        for k, v in drink_counts_specific_bar.items()
-    ]
-
-    # Classifica per il bar specifico
-    all_consumazioni_specific_bar = get_user_consumazioni(None, bar_id) # Tutte le consumazioni per questo bar
-    user_counts_specific_bar = {}
-    for cons_fields in all_consumazioni_specific_bar:
-        cons = cons_fields.get('fields', {})
-        if 'User' not in cons or not cons['User']:
-            continue
-        uid = cons['User'][0]
-        user = get_user_by_id(uid) # Inefficiente
-        user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else f'Utente {uid[:5]}...'
-        user_counts_specific_bar[user_email] = user_counts_specific_bar.get(user_email, 0) + 1
-    classifica_specific_bar = [
-        {'nome': email, 'conteggio': count}
-        for email, count in sorted(user_counts_specific_bar.items(), key=lambda x: x[1], reverse=True)
-    ][:10]
-    
-    current_bar_details = get_bar_by_id(bar_id)
-
-    # STATISTICHE UTENTE
-    num_consumazioni_utente = len(raw_consumazioni_utente)
-    tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
-                    for c in raw_consumazioni_utente 
-                    if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
-    tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
-    
-    esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
-    perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
-    
-    drink_preferito_utente = "N/A"
-    if user_drinks_list_specific_bar: # user_drinks_list_specific_bar è già calcolato per questo bar
-        drink_preferito_utente = max(user_drinks_list_specific_bar, key=lambda x: x['conteggio'])['nome']
-
-    return render_template('dashboard.html',
-                         bar=current_bar_details, 
-                         consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                         user_drinks_aggregati=user_drinks_list_specific_bar, 
-                         classifica=classifica_specific_bar,
-                         # Nuove statistiche utente (specifiche per questo bar)
-                         num_consumazioni_utente=num_consumazioni_utente,
-                         tasso_medio_utente=round(tasso_medio_utente, 2),
-                         drink_preferito_utente=drink_preferito_utente, # Sarà il preferito in questo bar
-                         perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1)
-                         )
-
-# Il vecchio endpoint /invia_dato non è più necessario, ora usiamo /arduino_peso/<peso>
-
 @app.route('/get_arduino_data')
 def get_arduino_data():
     """Ottiene l'ultimo dato inviato da Arduino"""
@@ -1329,6 +1065,10 @@ def registra_sorso(consumazione_id, volume):
             print(f"DEBUG - Errore nel calcolo delle date: {str(e)}")
             return None
 
+        # Ottieni lo stato dello stomaco dalla sessione o dalla consumazione
+        stomaco = session.get('stomaco_state', consumazione['fields'].get('Stomaco', 'Pieno')).lower()
+        print(f"DEBUG - Stato stomaco: {stomaco}")
+
         # Calcola il BAC per il nuovo sorso
         try:
             bac_sorso = calcola_tasso_alcolemico_widmark(
@@ -1336,7 +1076,7 @@ def registra_sorso(consumazione_id, volume):
                 genere=genere,
                 volume=float(volume),
                 gradazione=float(gradazione),
-                stomaco=consumazione['fields'].get('Stomaco', 'Pieno').lower(),
+                stomaco=stomaco,
                 ora_inizio=ora_inizio.strftime('%H:%M'),
                 ora_fine=ora_fine.strftime('%H:%M')
             )
@@ -1675,16 +1415,18 @@ def nuovo_drink():
         # Ottieni i valori selezionati
         drink_id = request.form.get('drink_id')
         bar_id = request.form.get('bar_id')
+        stomaco = request.form.get('stomaco')  # Get the stomach state from the form
         
-        logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}")
+        logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}, Stomaco: {stomaco}")
         
         if not drink_id or not bar_id:
             flash('Seleziona un drink e un bar prima di iniziare', 'danger')
             logger.warning("Mancano drink_id o bar_id")
         else:
-            # Salva il drink_id nella sessione
+            # Salva il drink_id e lo stato dello stomaco nella sessione
             session['selected_drink_id'] = drink_id
-            logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}")
+            session['stomaco_state'] = stomaco  # Save the stomach state in the session
+            logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}, stomaco: {stomaco}")
             # Reindirizza alla pagina di monitoraggio
             return redirect(url_for('monitora_drink', drink_id=drink_id, bar_id=bar_id))
     
@@ -1797,7 +1539,8 @@ def create_consumption():
         data = request.get_json()
         peso_iniziale = float(data.get('peso_iniziale', 0))
         drink_id = data.get('drink_id')
-        bar_id = data.get('bar_id')  # Ottieni il bar_id direttamente dal form
+        bar_id = data.get('bar_id')
+        stomaco = data.get('stomaco', 'pieno')  # Default a 'pieno' se non specificato
         
         if peso_iniziale <= 0:
             return jsonify({'success': False, 'error': 'Peso iniziale non valido. Assicurati che il bicchiere sia posizionato sul sottobicchiere.'})
@@ -1809,18 +1552,20 @@ def create_consumption():
             return jsonify({'success': False, 'error': 'Bar non selezionato'})
         
         # Recupera i dati dell'utente e del drink
-        user_id = session['user']  # user_id è direttamente in session['user']
+        user_id = session['user']
         drink = get_drink_by_id(drink_id)
         
         if not drink:
             return jsonify({'success': False, 'error': 'Drink non trovato'})
+        
+        # Salva lo stato dello stomaco nella sessione
+        session['stomaco_state'] = stomaco
         
         # Crea una nuova consumazione in Airtable
         percentuale_alcol = float(drink['fields'].get('Percentuale', 0))
         grammi_alcol = (percentuale_alcol / 100) * peso_iniziale
         
         # Calcola il BAC stimato (molto semplificato per questo esempio)
-        # Poiché session['user'] contiene solo l'ID e non info sull'utente, utilizziamo valori di default
         peso_utente = 70  # Peso default 70kg
         genere = 'M'  # Genere default 'M'
         
@@ -1836,9 +1581,8 @@ def create_consumption():
             'Authorization': f'Bearer {AIRTABLE_API_KEY}',
             'Content-Type': 'application/json'
         }
-        # Bar_id è già ottenuto dal form JSON
             
-        # Prepara solo i dati essenziali, lasciando che Airtable gestisca i campi calcolati
+        # Prepara i dati includendo lo stato dello stomaco
         data = {
             'fields': {
                 'User': [user_id],
@@ -1847,7 +1591,7 @@ def create_consumption():
                 'Peso (g)': peso_iniziale,
                 'Tasso Calcolato (g/L)': bac,
                 'Completato': 'Non completato',
-                'Stomaco': 'Pieno'
+                'Stomaco': stomaco.capitalize()  # Capitalizza la prima lettera
             }
         }
         response = requests.post(url, json=data, headers=headers)

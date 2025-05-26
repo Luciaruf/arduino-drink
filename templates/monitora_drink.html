@@ -311,7 +311,35 @@
             
             // Se non abbiamo ancora una consumazione attiva, creane una
             if (!consumazioneId || consumazioneId === 'null') {
-                createConsumption(peso);
+                // Ottieni lo stato dello stomaco dalla sessione
+                const stomaco = '{{ session.get("stomaco_state", "pieno") }}';
+                console.log('Stato dello stomaco dalla sessione:', stomaco);
+                
+                fetch('/create_consumption', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        peso_iniziale: pesoIniziale,
+                        drink_id: selectedDrinkId,
+                        bar_id: selectedBarId,
+                        stomaco: stomaco
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        consumazioneId = data.consumption_id;
+                        updateStatusMessage(`Consumazione creata con successo! BAC iniziale: ${data.bac} g/L`, 'success');
+                    } else {
+                        updateStatusMessage('Errore nella creazione della consumazione: ' + data.error, 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    updateStatusMessage('Errore durante la creazione della consumazione', 'danger');
+                });
             }
         }
         
@@ -325,6 +353,11 @@
             });
             
             console.log('Sorso rilevato:', quantita + 'g');
+            
+            // Registra il sorso se abbiamo una consumazione attiva
+            if (consumazioneId && consumazioneId !== 'null') {
+                registraSorso(consumazioneId, quantita);
+            }
         }
         
         // Aggiorna il peso complessivo consumato
@@ -378,54 +411,48 @@
     }
     
     // Funzione per creare una nuova consumazione
-    function createConsumption(peso) {
-        console.log('Tentativo di creare consumazione con peso:', peso);
-        console.log('drink_id:', selectedDrinkId);
-        console.log('bar_id:', selectedBarId);
-
-        if (!selectedDrinkId || !selectedBarId) {
-            console.error('Impossibile creare consumazione: mancano drink_id o bar_id');
-            updateStatusMessage('Errore: drink o bar non selezionati.', 'danger');
+    function createConsumption() {
+        // Ottieni il peso iniziale dal grafico
+        const initialWeight = weightData[0]?.y || 0;
+        
+        if (initialWeight <= 0) {
+            showError('Peso iniziale non valido. Assicurati che il bicchiere sia posizionato sul sottobicchiere.');
             return;
         }
-        
-        const data = {
-            drink_id: selectedDrinkId,
-            bar_id: selectedBarId,
-            peso_iniziale: peso
-        };
-        
-        console.log('Dati inviati per create_consumption:', data);
 
+        // Ottieni lo stato dello stomaco dalla sessione
+        const stomaco = '{{ session.get("stomaco_state", "pieno") }}';
+        
         fetch('/create_consumption', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(data)
+            body: JSON.stringify({
+                peso_iniziale: initialWeight,
+                drink_id: '{{ drink_id }}',
+                bar_id: '{{ bar_id }}',
+                stomaco: stomaco
+            })
         })
-        .then(response => {
-            console.log('Risposta ricevuta da /create_consumption:', response);
-            if (!response.ok) {
-                // Loggarisposta non OK
-                response.text().then(text => console.error('Errore HTTP nella risposta:', response.status, text));
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            console.log('Dati JSON della risposta:', data);
             if (data.success) {
-                consumazioneId = data.consumption_id;
-                console.log('Consumazione creata con ID:', consumazioneId);
-                updateStatusMessage('Consumazione iniziata', 'success');
+                consumptionId = data.consumption_id;
+                document.getElementById('consumption-status').textContent = `Monitoraggio attivo: ${data.drink_name}`;
+                document.getElementById('start-monitoring').style.display = 'none';
+                document.getElementById('stop-monitoring').style.display = 'block';
+                document.getElementById('manual-sip-section').style.display = 'block';
+                
+                // Aggiorna il grafico con il peso iniziale
+                updateWeightGraph(initialWeight);
             } else {
-                console.error('Errore nella creazione della consumazione:', data.error);
-                updateStatusMessage('Errore: ' + data.error, 'danger');
+                showError(data.error || 'Errore durante la creazione della consumazione');
             }
         })
         .catch(error => {
-            console.error('Errore nella creazione della consumazione:', error);
-            updateStatusMessage('Errore di comunicazione con il server', 'danger');
+            console.error('Error:', error);
+            showError('Errore durante la creazione della consumazione');
         });
     }
     
@@ -464,7 +491,7 @@
                 
                 // Reindirizza alla pagina principale dopo qualche secondo
                 setTimeout(() => {
-                    window.location.href = '/dashboard';
+                    window.location.href = '/world';
                 }, 3000);
             } else {
                 updateStatusMessage('Errore: ' + data.error, 'danger');
