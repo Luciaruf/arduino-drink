@@ -1468,7 +1468,7 @@ def nuovo_drink():
         if selected_bar_id:
             logger.info(f"Bar selezionato: {selected_bar_id}")
             # Salva il bar selezionato nella sessione
-            session['selected_bar_id'] = selected_bar_id
+            session['bar_id'] = selected_bar_id  # Changed from selected_bar_id to bar_id
             
             # Ottieni tutti i drink prima del filtraggio
             all_drinks = get_drinks()
@@ -1494,6 +1494,8 @@ def nuovo_drink():
             flash('Seleziona un drink e un bar prima di iniziare', 'danger')
             logger.warning("Mancano drink_id o bar_id")
         else:
+            # Salva il drink_id nella sessione
+            session['selected_drink_id'] = drink_id
             logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}")
             # Reindirizza alla pagina di monitoraggio
             return redirect(url_for('monitora_drink', drink_id=drink_id, bar_id=bar_id))
@@ -2327,4 +2329,4 @@ def drink_master():
                            interpretazione_bac=interpretazione_bac)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='127.0.0.1', port=8080, debug=True)

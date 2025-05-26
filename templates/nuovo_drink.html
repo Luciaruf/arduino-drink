@@ -27,6 +27,57 @@
 
 {% block content %}
 <div class="container my-4">
+    <!-- Form per inserire un nuovo drink -->
+    <div class="row mb-4">
+        <div class="col-lg-8 mx-auto">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i> Inserisci Nuovo Drink</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('nuovo_drink') }}" method="POST">
+                        <input type="hidden" name="form_action" value="create_drink">
+                        
+                        <div class="mb-3">
+                            <label for="drink-name" class="form-label">Nome del Drink</label>
+                            <input type="text" class="form-control" id="drink-name" name="drink_name" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="drink-gradazione" class="form-label">Gradazione Alcolica (%)</label>
+                            <input type="number" class="form-control" id="drink-gradazione" name="drink_gradazione" min="0" max="100" step="0.1" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="drink-alcolico" class="form-label">Tipo di Drink</label>
+                            <select class="form-select" id="drink-alcolico" name="drink_alcolico" required>
+                                <option value="1">Alcolico</option>
+                                <option value="0">Analcolico</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="drink-bars" class="form-label">Bar Disponibili</label>
+                            <select class="form-select" id="drink-bars" name="drink_bars" multiple required>
+                                {% for bar in bars %}
+                                <option value="{{ bar.id }}">{{ bar.fields.Name }} - {{ bar.fields.Città }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text">Tieni premuto Ctrl (o Cmd su Mac) per selezionare più bar</div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-save me-2"></i> Salva Drink
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form esistente per selezionare un drink -->
     <div class="row">
         <div class="col-lg-8 mx-auto">
             <div class="card">
@@ -42,7 +93,20 @@
                     </div>
                     {% endfor %}
                     
-
+                    <!-- Mostra il drink selezionato se presente -->
+                    {% if session.get('selected_drink_id') %}
+                    <div class="alert alert-info d-flex align-items-center mb-4">
+                        <i class="fas fa-glass-martini-alt me-2"></i>
+                        <div>
+                            <strong>Drink selezionato:</strong> 
+                            {% for drink in drinks %}
+                                {% if drink.id == session.get('selected_drink_id') %}
+                                    {{ drink.fields.Name }}
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
                     
                     <!-- Card per inizializzare un nuovo drink -->
                     <div class="card mb-4 fade-in" id="inizializza-drink-card">
