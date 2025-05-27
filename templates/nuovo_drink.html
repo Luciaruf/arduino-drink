@@ -4,194 +4,317 @@
 
 {% block styles %}
 <style>
-    /* Stili per la pagina di selezione drink */
-    .drink-card {
+    .drink-selection-container {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 15px;
+        padding: 2rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        margin-top: 2rem;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-control {
+        border-radius: 10px;
+        border: 2px solid #e9ecef;
+        padding: 0.8rem 1rem;
         transition: all 0.3s ease;
     }
-    
-    .drink-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+
+    .form-control:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.15);
     }
-    
-    .fade-in {
-        animation: fadeIn 0.5s ease-in;
+
+    .form-control:disabled {
+        background-color: #f8f9fa;
+        cursor: not-allowed;
     }
-    
+
+    .form-label {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 0.5rem;
+    }
+
+    .stomaco-section {
+        background-color: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin: 1.5rem 0;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    }
+
+    .form-check {
+        margin: 1rem 0;
+    }
+
+    .form-check-input {
+        width: 1.2em;
+        height: 1.2em;
+        margin-top: 0.2em;
+    }
+
+    .form-check-label {
+        font-size: 1.1em;
+        color: #495057;
+        margin-left: 0.5rem;
+    }
+
+    .btn-primary {
+        padding: 0.8rem 2rem;
+        font-size: 1.1em;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+        border: none;
+        transition: all 0.3s ease;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 123, 255, 0.3);
+    }
+
+    .btn-primary:disabled {
+        background: #6c757d;
+        transform: none;
+        box-shadow: none;
+    }
+
+    .loading-text {
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    .error-text {
+        color: #dc3545;
+        font-style: italic;
+    }
+
+    .page-title {
+        color: #2c3e50;
+        font-weight: 700;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+
+    .alert-info {
+        background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 1.5rem;
+    }
+
+    .alert-info .btn-primary {
+        background: white;
+        color: #17a2b8;
+        margin-left: 1rem;
+    }
+
+    .alert-info .btn-primary:hover {
+        background: #f8f9fa;
+    }
+
+    /* Animazioni */
     @keyframes fadeIn {
-        0% { opacity: 0; }
-        100% { opacity: 1; }
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-in {
+        animation: fadeIn 0.5s ease-out;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container my-4">
-    <!-- Form per inserire un nuovo drink -->
-    <div class="row mb-4">
-        <div class="col-lg-8 mx-auto">
-            <div class="card">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i> Inserisci Nuovo Drink</h5>
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <h1 class="display-4 text-center mb-4 fw-bold text-primary">Nuovo Drink</h1>
+            
+            {% if consumazione_attiva %}
+            <div class="alert alert-info d-flex align-items-center shadow-sm" role="alert">
+                <i class="fas fa-info-circle fa-2x me-3"></i>
+                <div class="flex-grow-1">
+                    Hai già una consumazione attiva per {{ drink_attivo.fields.Name }}.
                 </div>
-                <div class="card-body">
-                    <form action="{{ url_for('nuovo_drink') }}" method="POST">
-                        <input type="hidden" name="form_action" value="create_drink">
-                        
-                        <div class="mb-3">
-                            <label for="drink-name" class="form-label">Nome del Drink</label>
-                            <input type="text" class="form-control" id="drink-name" name="drink_name" required>
+                <a href="{{ url_for('monitora_drink') }}" class="btn btn-light">
+                    <i class="fas fa-play-circle me-2"></i>Continua a monitorare
+                </a>
+            </div>
+            {% else %}
+            <div class="card shadow-lg border-0 rounded-4">
+                <div class="card-body p-4">
+                    <form id="drinkForm" method="POST" action="{{ url_for('nuovo_drink') }}">
+                        <div class="row g-4">
+                            <!-- Selezione Città -->
+                            <div class="col-md-4">
+                                <div class="form-floating">
+                                    <select class="form-select" id="city" name="city">
+                                        <option value="">Seleziona una città</option>
+                                        {% for city in cities %}
+                                        <option value="{{ city }}">{{ city }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <label for="city">
+                                        <i class="fas fa-city me-2"></i>Città
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Selezione Bar -->
+                            <div class="col-md-4">
+                                <div class="form-floating">
+                                    <select class="form-select" id="bar" name="bar_id" disabled>
+                                        <option value="">Seleziona prima una città</option>
+                                    </select>
+                                    <label for="bar">
+                                        <i class="fas fa-glass-martini-alt me-2"></i>Bar
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Selezione Drink -->
+                            <div class="col-md-4">
+                                <div class="form-floating">
+                                    <select class="form-select" id="drink" name="drink_id" disabled>
+                                        <option value="">Seleziona prima un bar</option>
+                                    </select>
+                                    <label for="drink">
+                                        <i class="fas fa-wine-glass-alt me-2"></i>Drink
+                                    </label>
+                                </div>
+                            </div>
                         </div>
-                        
-                        <div class="mb-3">
-                            <label for="drink-gradazione" class="form-label">Gradazione Alcolica (%)</label>
-                            <input type="number" class="form-control" id="drink-gradazione" name="drink_gradazione" min="0" max="100" step="0.1" required>
+
+                        <!-- Stato Stomaco -->
+                        <div class="card bg-light border-0 mt-4">
+                            <div class="card-body">
+                                <h5 class="card-title mb-3">
+                                    <i class="fas fa-utensils me-2"></i>Stato dello stomaco
+                                </h5>
+                                <div class="d-flex gap-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="stomaco" id="stomacoPieno" value="pieno" checked>
+                                        <label class="form-check-label" for="stomacoPieno">
+                                            <i class="fas fa-check-circle me-2 text-success"></i>Pieno
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="stomaco" id="stomacoVuoto" value="vuoto">
+                                        <label class="form-check-label" for="stomacoVuoto">
+                                            <i class="fas fa-times-circle me-2 text-danger"></i>Vuoto
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        
-                        <div class="mb-3">
-                            <label for="drink-alcolico" class="form-label">Tipo di Drink</label>
-                            <select class="form-select" id="drink-alcolico" name="drink_alcolico" required>
-                                <option value="1">Alcolico</option>
-                                <option value="0">Analcolico</option>
-                            </select>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="drink-bars" class="form-label">Bar Disponibili</label>
-                            <select class="form-select" id="drink-bars" name="drink_bars" multiple required>
-                                {% for bar in bars %}
-                                <option value="{{ bar.id }}">{{ bar.fields.Name }} - {{ bar.fields.Città }}</option>
-                                {% endfor %}
-                            </select>
-                            <div class="form-text">Tieni premuto Ctrl (o Cmd su Mac) per selezionare più bar</div>
-                        </div>
-                        
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-success">
-                                <i class="fas fa-save me-2"></i> Salva Drink
+
+                        <div class="text-center mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg px-5" id="submitBtn" disabled>
+                                <i class="fas fa-play-circle me-2"></i>Inizia a bere
                             </button>
                         </div>
                     </form>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Form esistente per selezionare un drink -->
-    <div class="row">
-        <div class="col-lg-8 mx-auto">
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-glass-martini-alt me-2"></i> Nuovo Drink</h5>
-                </div>
-                <div class="card-body">
-                    <!-- Mostra eventuali messaggi flash -->
-                    {% for category, message in get_flashed_messages(with_categories=true) %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
-                    {% endfor %}
-                    
-                    <!-- Mostra il drink selezionato se presente -->
-                    {% if session.get('selected_drink_id') %}
-                    <div class="alert alert-info d-flex align-items-center mb-4">
-                        <i class="fas fa-glass-martini-alt me-2"></i>
-                        <div>
-                            <strong>Drink selezionato:</strong> 
-                            {% for drink in drinks %}
-                                {% if drink.id == session.get('selected_drink_id') %}
-                                    {{ drink.fields.Name }}
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    
-                    <!-- Card per inizializzare un nuovo drink -->
-                    <div class="card mb-4 fade-in" id="inizializza-drink-card">
-                        <div class="card-header bg-primary text-white">
-                            <h5 class="mb-0"><i class="fas fa-glass-cheers me-2"></i> Seleziona Drink</h5>
-                        </div>
-                        <div class="card-body">
-                            <form id="drink-form" method="post" action="{{ url_for('nuovo_drink') }}">
-                                <div class="mb-3">
-                                    <label for="city-select" class="form-label">Dove sei?</label>
-                                    <select class="form-select" id="city-select" name="city" required>
-                                        <option value="" selected disabled>Seleziona una città...</option>
-                                        {% for city in cities %}
-                                        <option value="{{ city }}" {% if selected_city == city %}selected{% endif %}>{{ city }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label for="bar-select" class="form-label">In quale bar?</label>
-                                    <select class="form-select" id="bar-select" name="bar_id" required {% if not bars %}disabled{% endif %}>
-                                        <option value="" selected disabled>{% if not bars %}Prima seleziona una città...{% else %}Seleziona un bar...{% endif %}</option>
-                                        {% if bars %}
-                                        {% for bar in bars %}
-                                        <option value="{{ bar.id }}" {% if selected_bar_id == bar.id %}selected{% endif %}>{{ bar.fields.Name }}</option>
-                                        {% endfor %}
-                                        {% endif %}
-                                    </select>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label for="stomaco-select" class="form-label">Stato dello stomaco</label>
-                                    <select class="form-select" id="stomaco-select" name="stomaco" required>
-                                        <option value="" selected disabled>Seleziona lo stato del tuo stomaco...</option>
-                                        <option value="pieno">Pieno</option>
-                                        <option value="vuoto">Vuoto</option>
-                                    </select>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label for="drink-select" class="form-label">Cosa vuoi bere?</label>
-                                    <select class="form-select" id="drink-select" name="drink_id" required {% if not drinks %}disabled{% endif %}>
-                                        <option value="" selected disabled>{% if not drinks %}Prima seleziona un bar...{% else %}Seleziona un drink...{% endif %}</option>
-                                        {% if drinks %}
-                                        {% for drink in drinks %}
-                                        <option value="{{ drink.id }}" data-alcol="{{ drink.fields.ABV }}">{{ drink.fields.Name }}</option>
-                                        {% endfor %}
-                                        {% endif %}
-                                    </select>
-                                </div>
-                                
-                                <input type="hidden" name="form_action" id="form_action" value="select">
-                                
-                                <div class="d-grid gap-2 mt-4">
-                                    <button type="submit" class="btn btn-primary btn-lg">
-                                        <i class="fas fa-play-circle me-2"></i> Inizia Monitoraggio
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            {% endif %}
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const citySelect = document.getElementById('city-select');
-        const barSelect = document.getElementById('bar-select');
+document.addEventListener('DOMContentLoaded', function() {
+    const citySelect = document.getElementById('city');
+    const barSelect = document.getElementById('bar');
+    const drinkSelect = document.getElementById('drink');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Gestione cambio città
+    citySelect.addEventListener('change', function() {
+        const selectedCity = this.value;
         
-        // Quando viene selezionata una città, invia il form per ottenere i bar
-        citySelect.addEventListener('change', function() {
-            const form = document.getElementById('drink-form');
-            form.submit();
-        });
-        
-        // Quando viene selezionato un bar, invia il form per ottenere i drink
-        barSelect.addEventListener('change', function() {
-            const form = document.getElementById('drink-form');
-            form.submit();
-        });
+        // Reset e disabilita le select a cascata
+        barSelect.innerHTML = '<option value="">Caricamento bar...</option>';
+        barSelect.disabled = true;
+        drinkSelect.innerHTML = '<option value="">Seleziona prima un bar</option>';
+        drinkSelect.disabled = true;
+        submitBtn.disabled = true;
+
+        if (selectedCity) {
+            // Carica i bar della città selezionata
+            fetch(`/get_bars_by_city/${selectedCity}`)
+                .then(response => response.json())
+                .then(data => {
+                    barSelect.innerHTML = '<option value="">Seleziona un bar</option>';
+                    data.bars.forEach(bar => {
+                        const option = document.createElement('option');
+                        option.value = bar.id;
+                        option.textContent = bar.name;
+                        barSelect.appendChild(option);
+                    });
+                    barSelect.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Errore nel caricamento dei bar:', error);
+                    barSelect.innerHTML = '<option value="">Errore nel caricamento</option>';
+                });
+        }
     });
+
+    // Gestione cambio bar
+    barSelect.addEventListener('change', function() {
+        const selectedBar = this.value;
+        
+        // Reset e disabilita la select dei drink
+        drinkSelect.innerHTML = '<option value="">Caricamento drink...</option>';
+        drinkSelect.disabled = true;
+        submitBtn.disabled = true;
+
+        if (selectedBar) {
+            // Carica i drink del bar selezionato
+            fetch(`/get_drinks_by_bar/${selectedBar}`)
+                .then(response => response.json())
+                .then(data => {
+                    drinkSelect.innerHTML = '<option value="">Seleziona un drink</option>';
+                    data.drinks.forEach(drink => {
+                        const option = document.createElement('option');
+                        option.value = drink.id;
+                        option.textContent = `${drink.name} (${drink.gradazione}%)`;
+                        drinkSelect.appendChild(option);
+                    });
+                    drinkSelect.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Errore nel caricamento dei drink:', error);
+                    drinkSelect.innerHTML = '<option value="">Errore nel caricamento</option>';
+                });
+        }
+    });
+
+    // Gestione cambio drink
+    drinkSelect.addEventListener('change', function() {
+        submitBtn.disabled = !this.value;
+    });
+
+    // Gestione submit form
+    document.getElementById('drinkForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        const data = {
+            drink_id: formData.get('drink_id'),
+            bar_id: formData.get('bar_id'),
+            stomaco: formData.get('stomaco')
+        };
+
+        // Reindirizza alla pagina di monitoraggio
+        window.location.href = `/monitora_drink?drink_id=${data.drink_id}&bar_id=${data.bar_id}`;
+    });
+});
 </script>
 {% endblock %}
