@@ -288,7 +288,11 @@
     
     <!-- Pulsante per tornare alla selezione del bar -->
     <div class="text-center mt-4">
-        <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-primary">Seleziona un altro bar</a>
+        {% if session.get('bar_id') %}
+            <a href="{{ url_for('nuovo_drink') }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-arrow-repeat"></i> Cambia Bar
+            </a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

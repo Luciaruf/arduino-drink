@@ -105,26 +105,34 @@
                         <a class="nav-link" href="{{ url_for('home') }}">Home</a>
                     </li>
                     {% if session.get('user') %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('world') }}">
-                                <i class="bi bi-globe"></i> World
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('game') }}">
-                                <i class="bi bi-trophy"></i> Game
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('drink_master') }}">
-                                <i class="bi bi-cup-straw"></i> Drink Master
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('nuovo_drink') }}">
-                                <i class="bi bi-cup-hot"></i> Nuovo Drink
-                            </a>
-                        </li>
+                        {% if is_locale %}
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('registra_drink') }}">
+                                    <i class="bi bi-cup-straw"></i> Registra Drink
+                                </a>
+                            </li>
+                        {% else %}
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('world') }}">
+                                    <i class="bi bi-globe"></i> World
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('game') }}">
+                                    <i class="bi bi-trophy"></i> Game
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('drink_master') }}">
+                                    <i class="bi bi-cup-straw"></i> Drink Master
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('nuovo_drink') }}">
+                                    <i class="bi bi-cup-hot"></i> Nuovo Drink
+                                </a>
+                            </li>
+                        {% endif %}
                     {% endif %}
                 </ul>
                 <ul class="navbar-nav">
@@ -177,7 +185,7 @@
                     {% endif %}
                 </div>
                 {% if session.get('bar_id') %}
-                    <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-primary btn-sm">
+                    <a href="{{ url_for('nuovo_drink') }}" class="btn btn-outline-primary btn-sm">
                         <i class="bi bi-arrow-repeat"></i> Cambia Bar
                     </a>
                 {% endif %}

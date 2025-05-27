@@ -762,28 +762,56 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        logger.info(f"[LOGIN] Tentativo di login per email: {email}")
-        user = get_user_by_email(email)
+        user_type = request.form.get('user_type', 'utente')
+        logger.info(f"[LOGIN] Tentativo di login per email: {email} come {user_type}")
+
+        # Seleziona la tabella appropriata in base al tipo di utente
+        table_name = 'Users' if user_type == 'utente' else 'Locali'
+        url = f'https://api.airtable.com/v0/{BASE_ID}/{table_name}'
+        headers = get_airtable_headers()
+        params = {
+            'filterByFormula': f"{{Email}}='{email}'"
+        }
+        
+        logger.info(f"[LOGIN] Ricerca in tabella: {table_name}")
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            records = response.json().get('records', [])
+            user = records[0] if records else None
+            logger.info(f"[LOGIN] Record trovato: {user is not None}")
+        else:
+            user = None
+            logger.error(f"[LOGIN] Errore nella richiesta Airtable: {response.status_code}")
 
         result = False
         if user:
             try:
-                # Verifica la password
-                result = verify_password(user['fields']['Password'], password)
-                logger.info(f"[LOGIN] Verifica hash per email {email}: {result}")
+                stored_password = user['fields'].get('Password')
+                logger.info(f"[LOGIN] Password memorizzata trovata: {stored_password is not None}")
+                
+                # Per i locali, la password è salvata come hash SHA-256
+                if user_type == 'locale':
+                    hashed_input = hashlib.sha256(password.encode()).hexdigest()
+                    result = stored_password == hashed_input
+                    logger.info(f"[LOGIN] Verifica hash per locale: {result}")
+                else:
+                    # Per gli utenti normali, usa il sistema PBKDF2
+                    result = verify_password(stored_password, password)
+                    logger.info(f"[LOGIN] Verifica hash per utente: {result}")
             except Exception as e:
                 logger.error(f"[LOGIN] Errore nella verifica dell'hash per email {email}: {e}")
                 result = False
         else:
-            logger.warning(f"[LOGIN] Utente non trovato per email: {email}")
+            logger.warning(f"[LOGIN] {user_type.capitalize()} non trovato per email: {email}")
 
         if result:
-            # Inizializza la sessione usando SessionManager
             SessionManager.init_session(user['id'], email)
-            logger.info(f"[LOGIN] Login riuscito per email: {email}")
+            session['user_type'] = user_type
+            logger.info(f"[LOGIN] Login riuscito per {user_type} con email: {email}")
             return redirect(url_for('home'))
         else:
-            logger.warning(f"[LOGIN] Login fallito per email: {email}")
+            logger.warning(f"[LOGIN] Login fallito per {user_type} con email: {email}")
             flash('Credenziali errate')
             return redirect(url_for('login'))
 
@@ -804,144 +832,6 @@ def logout():
     flash('Logout effettuato con successo', 'success')
     return redirect(url_for('home'))
 
-@app.route('/seleziona_bar', methods=['GET', 'POST'])
-@login_required
-def seleziona_bar():
-    # Get all bars for the city dropdown
-    bars = get_bars()
-    citta_list = list(set(bar['fields'].get('Città', '') for bar in bars if bar['fields']))
-
-    # Check if bar is selected from URL
-    bar_id = request.args.get('bar')
-    if bar_id:
-        old_bar_id = SessionManager.get_bar_id()
-        
-        # Se stiamo cambiando bar (non è la prima selezione)
-        if old_bar_id and old_bar_id != bar_id:
-            # Verifica se ci sono consumazioni non completate nel bar attuale
-            if SessionManager.get_active_consumption():
-                consumazione_id = SessionManager.get_active_consumption()
-                consumazione = get_consumazione_by_id(consumazione_id)
-                
-                if consumazione:
-                    # Recupera i dettagli della consumazione
-                    sorsi = get_sorsi_by_consumazione(consumazione_id)
-                    volume_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
-                    volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
-                    drink_id = consumazione['fields'].get('Drink', [''])[0] if 'Drink' in consumazione['fields'] else ''
-                    drink = get_drink_by_id(drink_id) if drink_id else None
-                    drink_name = drink['fields'].get('Name', 'Sconosciuto') if drink else 'Sconosciuto'
-                    
-                    # Se il drink non è completato, avvisa l'utente
-                    if volume_consumato < volume_iniziale:
-                        flash(f'Hai lasciato {drink_name} non terminato. Puoi trovarlo nella pagina Drink Master.', 'warning')
-            
-            # Informa l'utente del BAC corrente
-            bac_data = SessionManager.get_bac_data()
-            bac_corrente = bac_data['bac']
-            if bac_corrente > 0:
-                interpretazione = interpreta_tasso_alcolemico(bac_corrente)['livello']
-                flash(f'Il tuo tasso alcolemico attuale è: {bac_corrente:.3f} g/L ({interpretazione}).', 'info')
-            
-            # Resetta le variabili di sessione legate al bar
-            if SessionManager.get_active_consumption():
-                SessionManager.set_active_consumption(None)
-        
-        # Imposta il nuovo bar_id
-        SessionManager.set_bar_id(bar_id)
-        return redirect(url_for('simula'))
-
-    if request.method == 'POST':
-        if 'citta' in request.form:
-            # Prima selezione: città
-            citta = request.form.get('citta')
-            if citta:
-                bar_list = [bar for bar in bars if bar['fields'].get('Città') == citta]
-                return render_template('seleziona_bar.html', 
-                                    citta_selezionata=citta,
-                                    bar_list=bar_list,
-                                    citta_list=citta_list)
-
-    return render_template('seleziona_bar.html', 
-                         citta_list=citta_list,
-                         bar_list=[],
-                         citta_selezionata=None)
-
-@app.route('/simula', methods=['GET', 'POST'])
-@login_required
-def simula():
-    if not SessionManager.get_bar_id():
-        flash('Devi aver selezionato un bar per simulare.')
-        return redirect(url_for('seleziona_bar'))
-
-    bar_id = SessionManager.get_bar_id()
-    drinks = get_drinks(bar_id)
-    
-    consumazione_creata = None # Manteniamo solo la variabile per l'ID della consumazione
-    drink_selezionato_obj = None
-
-    # === GESTIONE DATO DA ARDUINO (TEMPORANEAMENTE FISSO PER TEST) ===
-    current_peso_cocktail_g = 200.0 # VALORE FISSO PER TEST
-    usando_peso_fisso_test = True # Flag per il template
-
-    if request.method == 'POST':
-        drink_id = request.form.get('drink')
-        stomaco_str = request.form.get('stomaco') # 'pieno' o 'vuoto'
-
-        if not drink_id or not stomaco_str:
-            flash('Devi selezionare un drink e lo stato del tuo stomaco.')
-            return redirect(url_for('simula'))
-
-        peso_da_usare_per_calcolo = float(current_peso_cocktail_g)
-
-        drink_selezionato_obj = next((d for d in drinks if d['id'] == drink_id), None)
-
-        try:
-            consumazione_creata = create_consumazione(
-                user_id=SessionManager.get_user_id(), 
-                drink_id=drink_id, 
-                bar_id=bar_id, 
-                peso_cocktail_g=peso_da_usare_per_calcolo,
-                stomaco_pieno_bool=(stomaco_str == 'pieno')
-            )
-
-            if consumazione_creata and 'fields' in consumazione_creata:
-                # Salva l'ID della consumazione nella sessione usando SessionManager
-                SessionManager.set_active_consumption(consumazione_creata['id'])
-                
-                flash('Simulazione registrata con successo!', 'success')
-                
-                # Resetta dato_da_arduino dopo l'uso
-                global dato_da_arduino, timestamp_dato
-                dato_da_arduino = None
-                timestamp_dato = None
-            else:
-                flash('Errore durante la registrazione della simulazione o calcolo del tasso.', 'danger')
-        
-        except Exception as e:
-            print(f"Errore imprevisto durante la creazione della consumazione/simulazione: {str(e)}")
-            flash(f'Errore imprevisto durante la simulazione: {str(e)}', 'danger')
-
-    bar_details = get_bar_by_id(bar_id)
-    
-    return render_template('simula.html', 
-                         bar=bar_details,
-                         drinks=drinks,
-                         drink_selezionato=drink_selezionato_obj,
-                         valore_peso_utilizzato=current_peso_cocktail_g,
-                         usando_peso_fisso_test=usando_peso_fisso_test,
-                         consumazione_id=consumazione_creata['id'] if consumazione_creata else None)
-
-def get_all_consumazioni():
-    """Recupera tutte le consumazioni dal sistema"""
-    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
-    response = requests.get(url, headers=get_airtable_headers())
-    
-    if response.status_code == 200:
-        return response.json().get('records', [])
-    
-    print(f"ERRORE GET_ALL_CONSUMAZIONI: {response.status_code}")
-    return []
 
 @app.route('/world')
 @login_required
@@ -1087,6 +977,18 @@ def world():
                           tasso_medio_utente=tasso_medio_utente,
                           perc_esiti_positivi_utente=perc_esiti_positivi_utente,
                           drink_preferito_utente=drink_preferito_utente)
+
+def get_all_consumazioni():
+    """Recupera tutte le consumazioni dal sistema"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
+    response = requests.get(url, headers=get_airtable_headers())
+    
+    if response.status_code == 200:
+        return response.json().get('records', [])
+    
+    print(f"ERRORE GET_ALL_CONSUMAZIONI: {response.status_code}")
+    return []
+
 
 @app.route('/get_arduino_data')
 @login_required
@@ -2080,6 +1982,123 @@ def get_active_consumption():
         return None
         
     return get_consumazione_by_id(active_consumption_id)
+
+@app.route('/partner')
+def partner():
+    return render_template('partner.html')
+
+@app.route('/register_partner', methods=['POST'])
+def register_partner():
+    try:
+        # Get form data
+        bar_name = request.form['barName']
+        email = request.form['email']
+        password = request.form['password']
+        confirm_password = request.form['confirm_password']
+        address = request.form['address']
+        city = request.form['city']
+
+        # Validate password
+        if len(password) < 8:
+            flash('La password deve contenere almeno 8 caratteri')
+            return redirect(url_for('partner'))
+        
+        if password != confirm_password:
+            flash('Le password non coincidono')
+            return redirect(url_for('partner'))
+
+        # Check if email already exists
+        url = f'https://api.airtable.com/v0/{BASE_ID}/Locali'
+        headers = get_airtable_headers()
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            existing_bars = response.json().get('records', [])
+            for bar in existing_bars:
+                if bar['fields'].get('Email') == email:
+                    flash('Email già registrata')
+                    return redirect(url_for('partner'))
+
+        # Hash the password
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+
+        # Create new bar record
+        new_bar = {
+            'fields': {
+                'Name': bar_name,
+                'Email': email,
+                'Password': hashed_password,
+                'Indirizzo': address,
+                'Città': city
+            }
+        }
+
+        # Add to Airtable
+        response = requests.post(url, headers=headers, json=new_bar)
+        
+        if response.status_code == 200:
+            flash('Registrazione completata con successo! Puoi effettuare il login con le tue credenziali.')
+            return redirect(url_for('home'))
+        else:
+            flash('Si è verificato un errore durante la registrazione. Riprova più tardi.')
+            return redirect(url_for('partner'))
+
+    except Exception as e:
+        logger.error(f"[REGISTER_PARTNER] Errore durante la registrazione del bar: {str(e)}")
+        flash('Si è verificato un errore durante la registrazione. Riprova più tardi.')
+        return redirect(url_for('partner'))
+
+@app.route('/registra_drink', methods=['GET', 'POST'])
+@login_required
+def registra_drink():
+    # Verifica che l'utente sia un locale
+    if session.get('user_type') != 'locale':
+        flash('Accesso non autorizzato')
+        return redirect(url_for('home'))
+    
+    if request.method == 'POST':
+        try:
+            nome = request.form['nome']
+            gradazione = float(request.form['gradazione'])
+            descrizione = request.form.get('descrizione', '')
+            alcolico = 'alcolico' in request.form
+            
+            # Crea il nuovo drink in Airtable
+            url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+            data = {
+                'records': [{
+                    'fields': {
+                        'Name': nome,
+                        'Gradazione': gradazione,
+                        'Descrizione': descrizione,
+                        'Alcolico (bool)': '1' if alcolico else '0',
+                        'Bar': [session['user']]  # Associa il drink al bar corrente
+                    }
+                }]
+            }
+            
+            response = requests.post(url, headers=get_airtable_headers(), json=data)
+            
+            if response.status_code == 200:
+                flash('Drink registrato con successo!', 'success')
+            else:
+                flash('Errore durante la registrazione del drink', 'danger')
+                
+        except Exception as e:
+            logger.error(f"[REGISTRA_DRINK] Errore: {str(e)}")
+            flash('Si è verificato un errore durante la registrazione', 'danger')
+    
+    # Recupera i drink del bar
+    drinks = get_drinks(session['user'])
+    return render_template('registra_drink.html', drinks=drinks)
+
+# Modifica il template base per mostrare menu diversi in base al tipo di utente
+@app.context_processor
+def inject_user_type():
+    return {
+        'is_locale': session.get('user_type') == 'locale',
+        'is_utente': session.get('user_type') == 'utente'
+    }
 
 if __name__ == '__main__':
     app.run(debug=True)
