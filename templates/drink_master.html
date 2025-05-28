@@ -16,12 +16,18 @@
         height: 30px;
         border-radius: 15px;
         overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
     .bac-step {
         flex: 1;
         height: 100%;
         border-right: 1px solid rgba(255, 255, 255, 0.5);
+        transition: all 0.3s ease;
+    }
+    
+    .bac-step:hover {
+        filter: brightness(1.1);
     }
     
     .bac-step:last-child {
@@ -31,13 +37,14 @@
     .bac-indicator {
         position: absolute;
         top: 0;
-        width: 10px;
+        width: 12px;
         height: 70px;
         background-color: #333;
-        border-radius: 5px;
+        border-radius: 6px;
         transform: translateX(-50%);
         transition: left 0.5s ease-in-out;
         z-index: 10;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     
     .bac-indicator:after {
@@ -61,6 +68,73 @@
     .bac-labels div {
         font-size: 0.85rem;
         color: #666;
+        font-weight: 500;
+    }
+
+    .bac-level-info {
+        position: absolute;
+        top: -30px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #333;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    }
+
+    .bac-indicator:hover .bac-level-info {
+        opacity: 1;
+    }
+
+    /* Stili per la barra di progresso */
+    .progress-bar {
+        transition: width 0.3s ease;
+    }
+
+    .progress-bar.completed {
+        background-color: var(--bs-success);
+    }
+
+    .progress-bar.in-progress {
+        background-color: var(--bs-warning);
+    }
+
+    /* Stili per l'indicatore del limite legale */
+    .legal-limit-marker {
+        position: absolute;
+        top: -5px;
+        width: 2px;
+        height: 40px;
+        background-color: #dc3545;
+        z-index: 5;
+    }
+
+    .legal-limit-label {
+        position: absolute;
+        top: -25px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #dc3545;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+    }
+
+    .legal-limit-marker:after {
+        content: '';
+        position: absolute;
+        bottom: -5px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 5px solid #dc3545;
     }
 </style>
 {% endblock %}
@@ -120,29 +194,41 @@
                     <!-- Indicatore di livello BAC a step -->
                     <div class="bac-steps-container mt-3">
                         <div class="bac-steps">
-                            <div class="bac-step bg-success" data-level="0.0-0.3" data-bs-toggle="tooltip" title="Sobrio (0.0-0.3 g/L)"></div>
-                            <div class="bac-step bg-info" data-level="0.3-0.45" data-bs-toggle="tooltip" title="Quasi al limite legale (0.3-0.45 g/L)"></div>
-                            <div class="bac-step bg-warning" data-level="0.45-0.5" data-bs-toggle="tooltip" title="Vicino al limite legale (0.45-0.5 g/L)"></div>
-                            <div class="bac-step bg-danger" data-level="0.5+" data-bs-toggle="tooltip" title="Non mettersi alla guida (>0.5 g/L)"></div>
+                            <div class="bac-step bg-success" data-level="0.0-0.2" data-bs-toggle="tooltip" title="Sobrio (0.0-0.2 g/L) - Nessun effetto evidente"></div>
+                            <div class="bac-step bg-info" data-level="0.2-0.3" data-bs-toggle="tooltip" title="Leggermente alterato (0.2-0.3 g/L) - Leggera euforia"></div>
+                            <div class="bac-step bg-warning" data-level="0.3-0.45" data-bs-toggle="tooltip" title="Quasi al limite legale (0.3-0.45 g/L) - Attenzione: effetti evidenti"></div>
+                            <div class="bac-step bg-danger" data-level="0.45-0.5" data-bs-toggle="tooltip" title="Vicino al limite legale (0.45-0.5 g/L) - Non mettersi alla guida"></div>
+                            <div class="bac-step bg-dark" data-level="0.5+" data-bs-toggle="tooltip" title="Oltre il limite legale (>0.5 g/L) - Guida vietata"></div>
                         </div>
                         
                         <!-- Indicatore della posizione attuale -->
-                        {% set position = (bac_corrente / 2.0 * 100)|round|int %}
+                        {% set position = (bac_corrente / 4.0 * 100)|round|int %}
                         {% set position = [position, 100]|min %}
                         {% set position = [position, 0]|max %}
-                        <div class="bac-indicator" style="left: {{ position }}%"></div>
+                        <div class="bac-indicator" data-position="{{ position }}">
+                            <div class="bac-level-info">{{ bac_corrente|round(3) }} g/L</div>
+                        </div>
                         
                         <!-- Etichette -->
                         <div class="bac-labels">
                             <div>0.0</div>
-                            <div>0.3</div>
-                            <div>0.45</div>
                             <div>0.5</div>
+                            <div>1.0</div>
                             <div>2.0</div>
+                            <div>3.0</div>
+                            <div>4.0</div>
+                        </div>
+
+                        <!-- Indicatore limite legale -->
+                        <div class="legal-limit-marker" style="left: 12.5%">
+                            <div class="legal-limit-label">Limite legale</div>
                         </div>
                     </div>
                     
-                    <small class="text-muted mt-2 d-block">Limite legale per la guida: 0.5 g/L</small>
+                    <small class="text-muted mt-2 d-block">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Limite legale per la guida: 0.5 g/L
+                    </small>
                 </div>
             </div>
         </div>
@@ -167,9 +253,9 @@
                                     <p class="mb-2"><strong>Bar:</strong> {{ consumazione.bar_name }}</p>
                                     
                                     <div class="progress mb-3" style="height: 25px;">
-                                        <div class="progress-bar {% if consumazione.completata %}bg-success{% else %}bg-warning{% endif %}" 
+                                        <div class="progress-bar {% if consumazione.completata %}completed{% else %}in-progress{% endif %}" 
                                              role="progressbar" 
-                                             style="width: {{ consumazione.percentuale_consumata }}%" 
+                                             data-width="{{ consumazione.percentuale_consumata }}"
                                              aria-valuenow="{{ consumazione.percentuale_consumata }}" 
                                              aria-valuemin="0" 
                                              aria-valuemax="100">
@@ -202,7 +288,31 @@
     
     <!-- Pulsante per tornare alla selezione del bar -->
     <div class="text-center mt-4">
-        <a href="{{ url_for('seleziona_bar') }}" class="btn btn-outline-primary">Seleziona un altro bar</a>
+        {% if session.get('bar_id') %}
+            <a href="{{ url_for('nuovo_drink') }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-arrow-repeat"></i> Cambia Bar
+            </a>
+        {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Gestione dell'indicatore BAC
+    const bacIndicator = document.querySelector('.bac-indicator');
+    if (bacIndicator) {
+        const position = bacIndicator.dataset.position;
+        bacIndicator.style.left = `${position}%`;
+    }
+
+    // Gestione delle barre di progresso
+    const progressBars = document.querySelectorAll('.progress-bar');
+    progressBars.forEach(bar => {
+        const width = bar.dataset.width;
+        bar.style.width = `${width}%`;
+    });
+});
+</script>
 {% endblock %}

@@ -1,5 +1,173 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 import hashlib, os
+from datetime import datetime, timedelta
+import requests
+import time
+from algoritmo import (
+    calcola_tasso_alcolemico_widmark, 
+    interpreta_tasso_alcolemico, 
+    calcola_bac_cumulativo,
+    calcola_alcol_metabolizzato
+)
+import pytz  # Aggiungiamo pytz per gestire i fusi orari
+from functools import wraps
+import logging
+
+# Configurazione del logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Definiamo il fuso orario italiano
+TIMEZONE = pytz.timezone('Europe/Rome')
+
+app = Flask(__name__)
+
+# Configurazione della sessione
+app.config.update(
+    SECRET_KEY=os.environ.get('SECRET_KEY', 'super-segreta'),
+    SESSION_COOKIE_SECURE=True,  # Cookie solo su HTTPS
+    SESSION_COOKIE_HTTPONLY=True,  # Previene accesso JavaScript
+    SESSION_COOKIE_SAMESITE='Lax',  # Protezione CSRF
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24),  # Durata massima sessione
+    SESSION_REFRESH_EACH_REQUEST=True  # Rinnovo cookie ad ogni richiesta
+)
+
+class SessionManager:
+    """Classe per gestire in modo centralizzato le sessioni"""
+    
+    @staticmethod
+    def init_session(user_id, user_email):
+        """Inizializza una nuova sessione per l'utente"""
+        session.clear()  # Pulisce eventuali dati residui
+        session.permanent = True  # Rende la sessione permanente
+        session['user'] = user_id
+        session['user_email'] = user_email
+        session['login_time'] = datetime.now(TIMEZONE).isoformat()
+        session['last_activity'] = datetime.now(TIMEZONE).isoformat()
+    
+    @staticmethod
+    def update_activity():
+        """Aggiorna il timestamp dell'ultima attività"""
+        session['last_activity'] = datetime.now(TIMEZONE).isoformat()
+    
+    @staticmethod
+    def is_session_valid():
+        """Verifica se la sessione è valida"""
+        if 'user' not in session or 'last_activity' not in session:
+            return False
+            
+        last_activity = datetime.fromisoformat(session['last_activity'])
+        now = datetime.now(TIMEZONE)
+        
+        # Sessione scade dopo 24 ore di inattività
+        return (now - last_activity) < timedelta(hours=24)
+    
+    @staticmethod
+    def clear_session():
+        """Pulisce la sessione"""
+        session.clear()
+    
+    @staticmethod
+    def get_user_id():
+        """Ottiene l'ID utente dalla sessione"""
+        return session.get('user')
+    
+    @staticmethod
+    def get_user_email():
+        """Ottiene l'email utente dalla sessione"""
+        return session.get('user_email')
+    
+    @staticmethod
+    def set_bac_data(bac_value, timestamp):
+        """Salva i dati del BAC nella sessione"""
+        session['bac_cumulativo_sessione'] = bac_value
+        session['ultima_ora_bac_sessione'] = timestamp
+    
+    @staticmethod
+    def get_bac_data():
+        """Ottiene i dati del BAC dalla sessione"""
+        return {
+            'bac': session.get('bac_cumulativo_sessione', 0.0),
+            'timestamp': session.get('ultima_ora_bac_sessione')
+        }
+    
+    @staticmethod
+    def set_active_consumption(consumption_id):
+        """Salva l'ID della consumazione attiva"""
+        session['active_consumazione_id'] = consumption_id
+    
+    @staticmethod
+    def get_active_consumption():
+        """Ottiene l'ID della consumazione attiva"""
+        return session.get('active_consumazione_id')
+    
+    @staticmethod
+    def set_consumption_data(data):
+        """Salva i dati della consumazione attiva nella sessione"""
+        session['consumption_data'] = data
+    
+    @staticmethod
+    def get_consumption_data():
+        """Ottiene i dati della consumazione attiva dalla sessione"""
+        return session.get('consumption_data', {})
+    
+    @staticmethod
+    def get_stomaco_state():
+        """Ottiene lo stato dello stomaco"""
+        return session.get('stomaco_state', 'pieno')  # Default a 'pieno'
+        
+    @staticmethod
+    def set_stomaco_state(state):
+        """Imposta lo stato dello stomaco"""
+        session['stomaco_state'] = state
+        
+    @staticmethod
+    def set_bar_id(bar_id):
+        """Salva l'ID del bar selezionato"""
+        session['bar_id'] = bar_id
+        
+    @staticmethod
+    def get_bar_id():
+        """Ottiene l'ID del bar selezionato"""
+        return session.get('bar_id')
+        
+    @staticmethod
+    def set_selected_drink_id(drink_id):
+        """Salva l'ID del drink selezionato"""
+        session['selected_drink_id'] = drink_id
+        
+    @staticmethod
+    def get_selected_drink_id():
+        """Ottiene l'ID del drink selezionato"""
+        return session.get('selected_drink_id')
+        
+    @staticmethod
+    def get_sorsi_from_session(consumazione_id):
+        """Ottiene i sorsi di una consumazione dalla sessione"""
+        session_key = f'sorsi_{consumazione_id}'
+        return session.get(session_key, [])
+        
+    @staticmethod
+    def save_sorso_to_session(consumazione_id, sorso):
+        """Salva un sorso nella sessione"""
+        session_key = f'sorsi_{consumazione_id}'
+        sorsi = session.get(session_key, [])
+        sorsi.append(sorso)
+        session[session_key] = sorsi
+        return len(sorsi)
+
+def login_required(f):
+    """Decoratore per proteggere le route che richiedono autenticazione"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not SessionManager.is_session_valid():
+            SessionManager.clear_session()
+            flash('La tua sessione è scaduta. Effettua nuovamente il login.', 'warning')
+            return redirect(url_for('login'))
+        
+        SessionManager.update_activity()
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Sistema semplice per l'hashing delle password compatibile con tutti i server
 def hash_password(password):
@@ -176,6 +344,13 @@ def get_drinks(bar_id=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
     response = requests.get(url, headers=get_airtable_headers())
     drinks = response.json()['records']
+    
+    # Processa i drink per assicurarsi che il campo Speciale sia sempre presente
+    for drink in drinks:
+        if 'fields' in drink:
+            # Se il campo Speciale non esiste, impostalo a False
+            if 'Speciale' not in drink['fields']:
+                drink['fields']['Speciale'] = False
     
     if bar_id:
         filtered_drinks = [d for d in drinks if bar_id in d['fields'].get('Bar', [])]
@@ -450,10 +625,6 @@ def home():
     bars = get_bars()
     return render_template('home.html', bars=bars)
 
-import logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -608,29 +779,56 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        logger.info(f"[LOGIN] Tentativo di login per email: {email}")
-        user = get_user_by_email(email)
+        user_type = request.form.get('user_type', 'utente')
+        logger.info(f"[LOGIN] Tentativo di login per email: {email} come {user_type}")
+
+        # Seleziona la tabella appropriata in base al tipo di utente
+        table_name = 'Users' if user_type == 'utente' else 'Locali'
+        url = f'https://api.airtable.com/v0/{BASE_ID}/{table_name}'
+        headers = get_airtable_headers()
+        params = {
+            'filterByFormula': f"{{Email}}='{email}'"
+        }
+        
+        logger.info(f"[LOGIN] Ricerca in tabella: {table_name}")
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            records = response.json().get('records', [])
+            user = records[0] if records else None
+            logger.info(f"[LOGIN] Record trovato: {user is not None}")
+        else:
+            user = None
+            logger.error(f"[LOGIN] Errore nella richiesta Airtable: {response.status_code}")
 
         result = False
         if user:
             try:
-                # Verifica la password
-                result = verify_password(user['fields']['Password'], password)
-                logger.info(f"[LOGIN] Verifica hash per email {email}: {result}")
+                stored_password = user['fields'].get('Password')
+                logger.info(f"[LOGIN] Password memorizzata trovata: {stored_password is not None}")
+                
+                # Per i locali, la password è salvata come hash SHA-256
+                if user_type == 'locale':
+                    hashed_input = hashlib.sha256(password.encode()).hexdigest()
+                    result = stored_password == hashed_input
+                    logger.info(f"[LOGIN] Verifica hash per locale: {result}")
+                else:
+                    # Per gli utenti normali, usa il sistema PBKDF2
+                    result = verify_password(stored_password, password)
+                    logger.info(f"[LOGIN] Verifica hash per utente: {result}")
             except Exception as e:
                 logger.error(f"[LOGIN] Errore nella verifica dell'hash per email {email}: {e}")
                 result = False
         else:
-            logger.warning(f"[LOGIN] Utente non trovato per email: {email}")
+            logger.warning(f"[LOGIN] {user_type.capitalize()} non trovato per email: {email}")
 
         if result:
-            session['user'] = user['id']
-            session['user_email'] = email
-            logger.info(f"[LOGIN] Login riuscito per email: {email}")
-            # Reindirizza alla home invece che alla dashboard per un caricamento più veloce
+            SessionManager.init_session(user['id'], email)
+            session['user_type'] = user_type
+            logger.info(f"[LOGIN] Login riuscito per {user_type} con email: {email}")
             return redirect(url_for('home'))
         else:
-            logger.warning(f"[LOGIN] Login fallito per email: {email}")
+            logger.warning(f"[LOGIN] Login fallito per {user_type} con email: {email}")
             flash('Credenziali errate')
             return redirect(url_for('login'))
 
@@ -639,188 +837,22 @@ def login():
 @app.route('/logout')
 def logout():
     # Prima di eliminare tutto, ottieni il BAC corrente per informare l'utente
-    bac_corrente = session.get('bac_cumulativo_sessione', 0.0)
-    interpretazione = ''
+    bac_data = SessionManager.get_bac_data()
+    bac_corrente = bac_data['bac']
+    
     if bac_corrente > 0:
         interpretazione = interpreta_tasso_alcolemico(bac_corrente)['livello']
         flash(f'Il tuo tasso alcolemico attuale è: {bac_corrente:.3f} g/L ({interpretazione}). Ricorda di non metterti alla guida se hai bevuto.', 'info')
     
-    # Pulisci la sessione
-    session.clear()
+    # Pulisci la sessione usando SessionManager
+    SessionManager.clear_session()
     flash('Logout effettuato con successo', 'success')
     return redirect(url_for('home'))
 
-@app.route('/seleziona_bar', methods=['GET', 'POST'])
-def seleziona_bar():
-    if 'user' not in session:
-        flash('Devi essere loggato')
-        return redirect(url_for('login'))
-
-    # Get all bars for the city dropdown
-    bars = get_bars()
-    citta_list = list(set(bar['fields'].get('Città', '') for bar in bars if bar['fields']))
-
-    # Check if bar is selected from URL
-    bar_id = request.args.get('bar')
-    if bar_id:
-        old_bar_id = session.get('bar_id')
-        
-        # Se stiamo cambiando bar (non è la prima selezione)
-        if old_bar_id and old_bar_id != bar_id:
-            # Verifica se ci sono consumazioni non completate nel bar attuale
-            if 'active_consumazione_id' in session:
-                consumazione_id = session['active_consumazione_id']
-                consumazione = get_consumazione_by_id(consumazione_id)
-                
-                if consumazione:
-                    # Recupera i dettagli della consumazione
-                    sorsi = get_sorsi_by_consumazione(consumazione_id)
-                    volume_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
-                    volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
-                    drink_id = consumazione['fields'].get('Drink', [''])[0] if 'Drink' in consumazione['fields'] else ''
-                    drink = get_drink_by_id(drink_id) if drink_id else None
-                    drink_name = drink['fields'].get('Name', 'Sconosciuto') if drink else 'Sconosciuto'
-                    
-                    # Se il drink non è completato, avvisa l'utente
-                    if volume_consumato < volume_iniziale:
-                        flash(f'Hai lasciato {drink_name} non terminato. Puoi trovarlo nella pagina Drink Master.', 'warning')
-            
-            # Informa l'utente del BAC corrente
-            bac_corrente = session.get('bac_cumulativo_sessione', 0.0)
-            if bac_corrente > 0:
-                interpretazione = interpreta_tasso_alcolemico(bac_corrente)['livello']
-                flash(f'Il tuo tasso alcolemico attuale è: {bac_corrente:.3f} g/L ({interpretazione}).', 'info')
-            
-            # Resetta le variabili di sessione legate al bar
-            if 'active_consumazione_id' in session:
-                del session['active_consumazione_id']
-            
-            # Nota: NON resettiamo bac_cumulativo_sessione, poiché questo dovrebbe persistere tra i bar
-            # per il calcolo corretto del tasso alcolemico totale
-        
-        # Imposta il nuovo bar_id
-        session['bar_id'] = bar_id
-        return redirect(url_for('simula'))
-
-    if request.method == 'POST':
-        if 'citta' in request.form:
-            # Prima selezione: città
-            citta = request.form.get('citta')
-            if citta:
-                bar_list = [bar for bar in bars if bar['fields'].get('Città') == citta]
-                return render_template('seleziona_bar.html', 
-                                    citta_selezionata=citta,
-                                    bar_list=bar_list,
-                                    citta_list=citta_list)
-
-    return render_template('seleziona_bar.html', 
-                         citta_list=citta_list,
-                         bar_list=[],
-                         citta_selezionata=None)
-
-@app.route('/simula', methods=['GET', 'POST'])
-def simula():
-    if 'user' not in session or 'bar_id' not in session:
-        flash('Devi essere loggato e aver selezionato un bar per simulare.')
-        return redirect(url_for('login')) # O seleziona_bar
-
-    bar_id = session['bar_id']
-    drinks = get_drinks(bar_id)
-    
-    consumazione_creata = None # Manteniamo solo la variabile per l'ID della consumazione
-    drink_selezionato_obj = None
-
-    # === GESTIONE DATO DA ARDUINO (TEMPORANEAMENTE FISSO PER TEST) ===
-    # current_peso_cocktail_g = dato_da_arduino # Commentato: riattivare per lettura da Arduino
-    current_peso_cocktail_g = 200.0 # VALORE FISSO PER TEST
-    usando_peso_fisso_test = True # Flag per il template
-    # La logica di reset di dato_da_arduino e timestamp_dato dopo la consumazione rimane,
-    # anche se non direttamente usata per current_peso_cocktail_g in questa modalità di test.
-
-    if request.method == 'POST':
-        drink_id = request.form.get('drink')
-        stomaco_str = request.form.get('stomaco') # 'pieno' o 'vuoto'
-
-        if not drink_id or not stomaco_str:
-            flash('Devi selezionare un drink e lo stato del tuo stomaco.')
-            return redirect(url_for('simula'))
-
-        # Non servono più i controlli su current_peso_cocktail_g proveniente da Arduino
-        # dato che ora è fisso e valido.
-        # if current_peso_cocktail_g is None: ... (rimosso)
-        # try: ... float(current_peso_cocktail_g) ... (rimosso, è già float)
-        
-        peso_da_usare_per_calcolo = float(current_peso_cocktail_g) # Assicuriamoci sia float
-
-        drink_selezionato_obj = next((d for d in drinks if d['id'] == drink_id), None)
-
-        try:
-            consumazione_creata = create_consumazione(
-                user_id=session['user'], 
-                drink_id=drink_id, 
-                bar_id=bar_id, 
-                peso_cocktail_g=peso_da_usare_per_calcolo, # Usa il peso (fisso per ora)
-                stomaco_pieno_bool=(stomaco_str == 'pieno')
-            )
-
-            if consumazione_creata and 'fields' in consumazione_creata:
-                # Salva l'ID della consumazione nella sessione
-                session['active_consumazione_id'] = consumazione_creata['id']
-                
-                flash('Simulazione registrata con successo!', 'success')
-                
-                # Resetta dato_da_arduino dopo l'uso
-                global dato_da_arduino, timestamp_dato
-                dato_da_arduino = None
-                timestamp_dato = None
-            else:
-                flash('Errore durante la registrazione della simulazione o calcolo del tasso.', 'danger')
-        
-        except Exception as e:
-            print(f"Errore imprevisto durante la creazione della consumazione/simulazione: {str(e)}")
-            flash(f'Errore imprevisto durante la simulazione: {str(e)}', 'danger')
-
-    bar_details = get_bar_by_id(bar_id) # Per avere il nome del bar aggiornato
-    
-    # Passiamo anche current_peso_cocktail_g al template per informare l'utente
-    return render_template('simula.html', 
-                         bar=bar_details,
-                         drinks=drinks,
-                         drink_selezionato=drink_selezionato_obj,
-                         valore_peso_utilizzato=current_peso_cocktail_g,
-                         usando_peso_fisso_test=usando_peso_fisso_test,
-                         consumazione_id=consumazione_creata['id'] if consumazione_creata else None)
-
-def get_all_consumazioni():
-    """Recupera tutte le consumazioni dal sistema"""
-    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
-    response = requests.get(url, headers=get_airtable_headers())
-    
-    if response.status_code == 200:
-        return response.json().get('records', [])
-    
-    print(f"ERRORE GET_ALL_CONSUMAZIONI: {response.status_code}")
-    return []
-
-@app.route('/dashboard')
-def dashboard():
-    if 'user' not in session:
-        flash('Devi essere loggato')
-        return redirect(url_for('login'))
-    
-    user_id = session['user']
-    bar_id = session.get('bar_id')
-    
-    # Usa il template originale per la dashboard specifica del bar
-    return render_dashboard(user_id, bar_id)
 
 @app.route('/world')
+@login_required
 def world():
-    """Pagina World con classifiche globali e statistiche"""
-    if 'user' not in session:
-        flash('Devi essere loggato')
-        return redirect(url_for('login'))
-    
     # Valori predefiniti in caso di errore
     classifica = []
     drink_popolari = []
@@ -834,7 +866,7 @@ def world():
     drink_preferito_utente = 'N/D'
     
     try:
-        user_id = session['user']
+        user_id = SessionManager.get_user_id()
         
         # Statistiche globali del sistema
         all_consumazioni = get_all_consumazioni()
@@ -846,7 +878,6 @@ def world():
         num_bar = len(all_bars)
         
         # Stima il numero di sorsi (senza richiamare i sorsi reali)
-        # Stimiamo una media di 5 sorsi per consumazione per evitare chiamate API lente
         totale_sorsi = totale_consumazioni * 5
         
         # Otteniamo prima tutti gli utenti in una sola chiamata
@@ -862,7 +893,6 @@ def world():
         for cons in all_consumazioni:
             if 'User' in cons['fields'] and cons['fields']['User']:
                 uid = cons['fields']['User'][0]
-                # Usiamo la cache locale invece di chiamare get_user_by_id
                 user = all_users.get(uid)
                 if user and 'fields' in user and 'Email' in user['fields']:
                     user_email = user['fields']['Email']
@@ -873,7 +903,7 @@ def world():
         classifica = [
             {'nome': email, 'conteggio': count}
             for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
-        ][:20]  # Limitato ai primi 20
+        ][:20]
         
         # Top drinks
         drink_counts = {}
@@ -917,14 +947,24 @@ def world():
         
         # Calcolo statistiche personali
         if num_consumazioni_utente > 0:
-            tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
-                           for c in raw_consumazioni_utente 
-                           if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
+            # Recupera tutti i sorsi dell'utente
+            all_sorsi = []
+            for consumazione in raw_consumazioni_utente:
+                sorsi = get_sorsi_by_consumazione(consumazione['id'])
+                all_sorsi.extend(sorsi)
             
-            tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
-            
-            esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
-            perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
+            # Calcola il BAC medio e la percentuale di positivi dai sorsi
+            if all_sorsi:
+                bac_values = [float(sorso['fields'].get('BAC Temporaneo', 0)) 
+                            for sorso in all_sorsi 
+                            if 'BAC Temporaneo' in sorso['fields']]
+                
+                # Calcola il BAC medio
+                tasso_medio_utente = sum(bac_values) / len(bac_values) if bac_values else 0.0
+                
+                # Calcola la percentuale di sorsi sopra il limite legale (0.5 g/L)
+                sorsi_oltre_limite = sum(1 for bac in bac_values if bac > 0.5)
+                perc_esiti_positivi_utente = (sorsi_oltre_limite / len(bac_values) * 100) if bac_values else 0
             
             # Drink preferito dell'utente
             drink_counts_utente = {}
@@ -955,258 +995,20 @@ def world():
                           perc_esiti_positivi_utente=perc_esiti_positivi_utente,
                           drink_preferito_utente=drink_preferito_utente)
 
-def render_dashboard(user_id, bar_id):
-    """Funzione helper per renderizzare la dashboard originale"""
-    # Codice originale della funzione dashboard
-
-    drinks_all = get_drinks() # Per risolvere i nomi dei drink
-    bars_all = get_bars()     # Per risolvere i nomi dei bar
-
-    consumazioni_utente_dettagliate = []
-    raw_consumazioni_utente = get_user_consumazioni(user_id=user_id, bar_id=bar_id if bar_id else None)
-
-    for cons_fields in raw_consumazioni_utente:
-        cons = cons_fields.get('fields', {})
-        created_time_str = cons_fields.get('createdTime')
-
-        # Risolvi nomi
-        drink_id_list = cons.get('Drink', [])
-        bar_id_list = cons.get('Bar', [])
-        
-        drink_name = 'N/D'
-        if drink_id_list:
-            drink_info = next((d['fields'].get('Name', 'N/D') for d in drinks_all if d['id'] == drink_id_list[0]), 'N/D')
-            drink_name = drink_info
-
-        bar_name = 'N/D'
-        if bar_id_list:
-            bar_info = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_list[0]), 'N/D')
-            bar_name = bar_info
-        
-        # Formattazione timestamp (dal campo 'timestamp' che abbiamo aggiunto)
-        timestamp_consumazione_str = cons.get('Time')
-        display_timestamp = 'N/D'
-        if timestamp_consumazione_str:
-            try:
-                dt_obj = datetime.fromisoformat(timestamp_consumazione_str.replace('Z', '+00:00'))
-                display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
-            except ValueError:
-                 # Se il formato non è esattamente ISO o manca Z, prova createdTime da Airtable
-                 if created_time_str:
-                    try:
-                        dt_obj = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
-                        display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
-                    except ValueError:
-                        display_timestamp = 'Timestamp invalido'                 
-                 else:
-                    display_timestamp = 'Timestamp mancante'
-
-        consumazioni_utente_dettagliate.append({
-            'drink_name': drink_name,
-            'bar_name': bar_name,
-            'timestamp': display_timestamp,
-            'peso_cocktail': cons.get('Peso (g)', 'N/D'),
-            'tasso': cons.get('Tasso Calcolato (g/L)', 'N/D'),
-            'esito': cons.get('Risultato', 'N/D'),
-            'stomaco': cons.get('Stomaco', 'N/D'),
-            'id': cons_fields.get('id')
-        })
-
-    # La logica per user_drinks (aggregato) e classifica può rimanere o essere adattata
-    # Per ora la commento se il template si concentrerà sui dettagli
-
-    if not bar_id:
-        # Statistiche globali (la classifica generale potrebbe ancora essere utile)
-        # consumazioni = get_user_consumazioni(user_id) # Già prese come raw_consumazioni_utente
-        all_consumazioni_altri_utenti = get_user_consumazioni(None) # Per classifica generale
-        # drinks = get_drinks() # Già prese come drinks_all
-        # bars = get_bars()     # Già prese come bars_all
-        # print("DEBUG - consumazioni trovate:", consumazioni)
-        # print("DEBUG - all_consumazioni:", all_consumazioni_altri_utenti)
-        # print("DEBUG - drinks:", drinks_all)
-        # print("DEBUG - bars:", bars_all)
-
-        # Raggruppa per bar e drink (user_drinks esistente)
-        user_drinks_aggregated = {}
-        for cons_fields in raw_consumazioni_utente: # Usa quelle già filtrate per l'utente
-            cons = cons_fields.get('fields', {})
-            if 'Bar' not in cons or not cons['Bar'] or 'Drink' not in cons or not cons['Drink']:
-                continue
-            # Nomi già risolti prima, potremmo riutilizzare bar_name e drink_name da lì se li avessimo strutturati
-            # Ma per ora rifacciamo il lookup per coerenza con il codice esistente di questa sezione
-            bar_id_cons = cons['Bar'][0]
-            drink_id_cons = cons['Drink'][0]
-            bar = next((b for b in bars_all if b['id'] == bar_id_cons), None)
-            drink = next((d for d in drinks_all if d['id'] == drink_id_cons), None)
-            _bar_name = bar['fields']['Name'] if bar else 'Bar Sconosciuto'
-            _drink_name = drink['fields']['Name'] if drink else 'Drink Sconosciuto'
-            key = f"{_bar_name} - {_drink_name}"
-            user_drinks_aggregated[key] = user_drinks_aggregated.get(key, 0) + 1
-        user_drinks_list_aggregated = [
-            {'nome': k, 'conteggio': v}
-            for k, v in user_drinks_aggregated.items()
-        ]
-
-        # Classifica generale su tutti i bar
-        user_counts = {}
-        for cons_fields in all_consumazioni_altri_utenti:
-            cons = cons_fields.get('fields', {})
-            if 'User' not in cons or not cons['User']:
-                continue
-            uid = cons['User'][0]
-            # Evitiamo di chiamare get_user_by_id per ogni consumazione per efficienza se possibile
-            # Airtable non fornisce facilmente i dati utente linkati direttamente in modo aggregabile
-            # Per una classifica reale, l'ideale sarebbe aggregare in Airtable o avere un DB separato
-            # Qui simuliamo cercando l'email, ma non è efficiente per molti utenti/consumazioni.
-            # Consideriamo un approccio semplificato per la classifica per ora.
-            # La logica esistente chiama get_user_by_id, la manterrò ma con un commento.
-            user = get_user_by_id(uid) # Molto inefficiente per classifiche grandi
-            user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else f'Utente {uid[:5]}...'
-            user_counts[user_email] = user_counts.get(user_email, 0) + 1
-        classifica_generale = [
-            {'nome': email, 'conteggio': count}
-            for email, count in sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
-        ][:10]
-
-        # STATISTICHE UTENTE
-        num_consumazioni_utente = len(raw_consumazioni_utente)
-        tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
-                        for c in raw_consumazioni_utente 
-                        if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
-        tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
-        
-        esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
-        perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
-        
-        drink_preferito_utente = "N/A"
-        if user_drinks_list_aggregated: # user_drinks_list_aggregated è già calcolato per l'utente
-            drink_preferito_utente = max(user_drinks_list_aggregated, key=lambda x: x['conteggio'])['nome']
-
-        # STATISTICHE GENERALI (solo se in dashboard globale)
-        bar_preferito_utente = "N/A"
-        num_consumazioni_totali_sistema = 0
-        drink_popolare_sistema = "N/A"
-        bar_popolare_sistema = "N/A"
-
-        if not bar_id:
-            # Bar preferito dall'utente (conteggio consumazioni per bar per l'utente loggato)
-            consumi_utente_per_bar = {}
-            for cons_fields in raw_consumazioni_utente:
-                cons_data = cons_fields.get('fields', {})
-                bar_ids_list = cons_data.get('Bar', [])
-                if bar_ids_list:
-                    bar_id_cons = bar_ids_list[0]
-                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
-                    consumi_utente_per_bar[bar_name] = consumi_utente_per_bar.get(bar_name, 0) + 1
-            if consumi_utente_per_bar:
-                bar_preferito_utente = max(consumi_utente_per_bar, key=consumi_utente_per_bar.get)
-
-            # Statistiche di sistema (usano all_consumazioni_altri_utenti che sono TUTTE le consumazioni)
-            num_consumazioni_totali_sistema = len(all_consumazioni_altri_utenti)
-
-            conteggio_drink_sistema = {}
-            conteggio_bar_sistema = {}
-            for cons_fields in all_consumazioni_altri_utenti:
-                cons_data = cons_fields.get('fields', {})
-                drink_ids_list = cons_data.get('Drink', [])
-                bar_ids_list = cons_data.get('Bar', [])
-                if drink_ids_list:
-                    drink_id_cons = drink_ids_list[0]
-                    drink_name = next((d['fields'].get('Name', 'N/D') for d in drinks_all if d['id'] == drink_id_cons), 'N/D')
-                    conteggio_drink_sistema[drink_name] = conteggio_drink_sistema.get(drink_name, 0) + 1
-                if bar_ids_list:
-                    bar_id_cons = bar_ids_list[0]
-                    bar_name = next((b['fields'].get('Name', 'N/D') for b in bars_all if b['id'] == bar_id_cons), 'N/D')
-                    conteggio_bar_sistema[bar_name] = conteggio_bar_sistema.get(bar_name, 0) + 1
-            
-            if conteggio_drink_sistema:
-                drink_popolare_sistema = max(conteggio_drink_sistema, key=conteggio_drink_sistema.get)
-            if conteggio_bar_sistema:
-                bar_popolare_sistema = max(conteggio_bar_sistema, key=conteggio_bar_sistema.get)
-            
-            return render_template('dashboard.html',
-                                 bar=None, 
-                                 consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                                 user_drinks_aggregati=user_drinks_list_aggregated, 
-                                 classifica=classifica_generale,
-                                 # Nuove statistiche utente
-                                 num_consumazioni_utente=num_consumazioni_utente,
-                                 tasso_medio_utente=round(tasso_medio_utente, 2),
-                                 drink_preferito_utente=drink_preferito_utente,
-                                 bar_preferito_utente=bar_preferito_utente, # Solo per globale
-                                 perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1),
-                                 # Nuove statistiche sistema (solo per globale)
-                                 num_consumazioni_totali_sistema=num_consumazioni_totali_sistema,
-                                 drink_popolare_sistema=drink_popolare_sistema,
-                                 bar_popolare_sistema=bar_popolare_sistema
-                                 )
-
-    # Statistiche per bar selezionato
-    # raw_consumazioni_utente sono già filtrate per bar_id se presente
-    # drinks = get_drinks(bar_id) # drinks_all già disponibili e filtrati se necessario
+def get_all_consumazioni():
+    """Recupera tutte le consumazioni dal sistema"""
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni'
+    response = requests.get(url, headers=get_airtable_headers())
     
-    # user_drinks aggregati per il bar specifico
-    drink_counts_specific_bar = {}
-    for cons_fields in raw_consumazioni_utente: # Già filtrate per utente e bar
-        cons = cons_fields.get('fields', {})
-        if 'Drink' not in cons or not cons['Drink']:
-            continue
-        drink_id_cons = cons['Drink'][0]
-        drink = next((d for d in drinks_all if d['id'] == drink_id_cons), None)
-        _drink_name = drink['fields']['Name'] if drink and 'fields' in drink and 'Name' in drink['fields'] else 'Drink Sconosciuto'
-        drink_counts_specific_bar[_drink_name] = drink_counts_specific_bar.get(_drink_name, 0) + 1
-    user_drinks_list_specific_bar = [
-        {'nome': k, 'conteggio': v}
-        for k, v in drink_counts_specific_bar.items()
-    ]
-
-    # Classifica per il bar specifico
-    all_consumazioni_specific_bar = get_user_consumazioni(None, bar_id) # Tutte le consumazioni per questo bar
-    user_counts_specific_bar = {}
-    for cons_fields in all_consumazioni_specific_bar:
-        cons = cons_fields.get('fields', {})
-        if 'User' not in cons or not cons['User']:
-            continue
-        uid = cons['User'][0]
-        user = get_user_by_id(uid) # Inefficiente
-        user_email = user['fields']['Email'] if user and 'fields' in user and 'Email' in user['fields'] else f'Utente {uid[:5]}...'
-        user_counts_specific_bar[user_email] = user_counts_specific_bar.get(user_email, 0) + 1
-    classifica_specific_bar = [
-        {'nome': email, 'conteggio': count}
-        for email, count in sorted(user_counts_specific_bar.items(), key=lambda x: x[1], reverse=True)
-    ][:10]
+    if response.status_code == 200:
+        return response.json().get('records', [])
     
-    current_bar_details = get_bar_by_id(bar_id)
+    print(f"ERRORE GET_ALL_CONSUMAZIONI: {response.status_code}")
+    return []
 
-    # STATISTICHE UTENTE
-    num_consumazioni_utente = len(raw_consumazioni_utente)
-    tassi_utente = [float(c.get('fields', {}).get('Tasso Calcolato (g/L)', 0.0)) 
-                    for c in raw_consumazioni_utente 
-                    if isinstance(c.get('fields', {}).get('Tasso Calcolato (g/L)'), (int, float))]
-    tasso_medio_utente = sum(tassi_utente) / len(tassi_utente) if tassi_utente else 0.0
-    
-    esiti_positivi_utente = sum(1 for c in raw_consumazioni_utente if c.get('fields', {}).get('Risultato') == 'Positivo')
-    perc_esiti_positivi_utente = (esiti_positivi_utente / num_consumazioni_utente * 100) if num_consumazioni_utente > 0 else 0
-    
-    drink_preferito_utente = "N/A"
-    if user_drinks_list_specific_bar: # user_drinks_list_specific_bar è già calcolato per questo bar
-        drink_preferito_utente = max(user_drinks_list_specific_bar, key=lambda x: x['conteggio'])['nome']
-
-    return render_template('dashboard.html',
-                         bar=current_bar_details, 
-                         consumazioni_dettagliate=consumazioni_utente_dettagliate,
-                         user_drinks_aggregati=user_drinks_list_specific_bar, 
-                         classifica=classifica_specific_bar,
-                         # Nuove statistiche utente (specifiche per questo bar)
-                         num_consumazioni_utente=num_consumazioni_utente,
-                         tasso_medio_utente=round(tasso_medio_utente, 2),
-                         drink_preferito_utente=drink_preferito_utente, # Sarà il preferito in questo bar
-                         perc_esiti_positivi_utente=round(perc_esiti_positivi_utente, 1)
-                         )
-
-# Il vecchio endpoint /invia_dato non è più necessario, ora usiamo /arduino_peso/<peso>
 
 @app.route('/get_arduino_data')
+@login_required
 def get_arduino_data():
     """Ottiene l'ultimo dato inviato da Arduino"""
     global dato_da_arduino, timestamp_dato
@@ -1217,11 +1019,13 @@ def get_arduino_data():
     })
 
 @app.route('/simulatore')
+@login_required
 def simulatore():
     """Pagina per simulare l'invio di dati peso da Arduino"""
     return render_template('simulatore.html')
 
 @app.route('/test-arduino')
+@login_required
 def test_arduino():
     global dato_da_arduino, timestamp_dato
     
@@ -1235,69 +1039,61 @@ def test_arduino():
                          dato=dato_da_arduino, 
                          tempo_trascorso=round(tempo_trascorso, 2))
 
-# La rotta del simulatore Arduino è stata rimossa perché non necessaria
-
 @app.route('/registra_sorso_ajax/<consumazione_id>', methods=['POST'])
+@login_required
 def registra_sorso_ajax(consumazione_id):
     """Endpoint per registrare un sorso via AJAX"""
-    if 'user' not in session:
-        return jsonify({'success': False, 'error': 'Utente non autenticato'})
+    print(f"DEBUG - Ricevuta richiesta per registrare sorso per consumazione {consumazione_id}")
     
     try:
         data = request.get_json()
         volume = float(data.get('volume', 0))
+        print(f"DEBUG - Volume ricevuto: {volume}g")
         
         if volume <= 0:
+            print("DEBUG - Volume non valido")
             return jsonify({'success': False, 'error': 'Volume non valido'})
         
         # Registra il sorso
+        print(f"DEBUG - Chiamata a registra_sorso con consumazione_id={consumazione_id}, volume={volume}")
         sorso = registra_sorso(consumazione_id, volume)
         
         if isinstance(sorso, dict) and 'error' in sorso:
-            # Errore nella registrazione del sorso
+            print(f"DEBUG - Errore nella registrazione del sorso: {sorso['error']}")
             return jsonify({'success': False, 'error': sorso['error']})
+        
+        # Recupera la lista aggiornata dei sorsi
+        print("DEBUG - Recupero lista aggiornata dei sorsi")
+        sorsi = get_sorsi_by_consumazione(consumazione_id)
+        print(f"DEBUG - Trovati {len(sorsi)} sorsi")
+        
+        # Aggiorna i dati nella sessione
+        consumption_data = SessionManager.get_consumption_data()
+        if consumption_data and consumption_data['id'] == consumazione_id:
+            consumption_data['sorsi'].append({
+                'volume': volume,
+                'timestamp': sorso['fields'].get('Ora inizio', ''),
+                'bac': float(sorso['fields'].get('BAC Temporaneo', 0))
+            })
+            consumption_data['volume_consumato'] = sum(float(s['volume']) for s in consumption_data['sorsi'])
+            SessionManager.set_consumption_data(consumption_data)
         
         return jsonify({
             'success': True,
             'sorso_id': sorso['id'] if sorso else None,
             'volume': volume,
-            'bac': sorso['fields'].get('BAC Temporaneo', 0) if sorso and 'fields' in sorso else 0
+            'bac': sorso['fields'].get('BAC Temporaneo', 0) if sorso and 'fields' in sorso else 0,
+            'sorsi': sorsi
         })
         
     except Exception as e:
+        print(f"DEBUG - Errore durante la registrazione del sorso: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
-# Funzione di utilità interna per verificare la consumazione attiva
-def get_active_consumption():
-    """Verifica se c'è una consumazione attiva per l'utente corrente e la restituisce"""
-    if 'user' not in session:
-        return None
-    
-    try:
-        # Ottieni tutte le consumazioni dell'utente
-        user_id = session.get('user')
-        if not user_id:
-            return None
-            
-        consumazioni = get_consumazioni_by_user(user_id)
-        
-        # Trova l'ultima consumazione non completata
-        for consumazione in consumazioni:
-            if consumazione['fields'].get('Completato', '') == 'Non completato':
-                return consumazione
-        
-        return None
-    
-    except Exception as e:
-        print(f"Errore nel recupero della consumazione attiva: {e}")
-        return None
-
 @app.route('/check_active_consumption')
+@login_required
 def check_active_consumption():
     """API per verificare se c'è una consumazione attiva per l'utente corrente"""
-    if 'user' not in session:
-        return jsonify({'active': False, 'error': 'Utente non autenticato'})
-    
     try:
         active_consumption = get_active_consumption()
         
@@ -1335,11 +1131,9 @@ def check_active_consumption():
         return jsonify({'active': False, 'error': str(e)})
 
 @app.route('/finish_consumption', methods=['POST'])
+@login_required
 def finish_consumption():
     """Completa una consumazione"""
-    if 'user' not in session:
-        return jsonify({'success': False, 'error': 'Utente non autenticato'})
-    
     try:
         data = request.get_json()
         consumption_id = data.get('consumption_id')
@@ -1354,7 +1148,7 @@ def finish_consumption():
             return jsonify({'success': False, 'error': 'Consumazione non trovata'})
         
         # Verifica che la consumazione appartenga all'utente corrente
-        if consumazione['fields'].get('User', []) and consumazione['fields']['User'][0] != session['user']:
+        if consumazione['fields'].get('User', []) and consumazione['fields']['User'][0] != SessionManager.get_user_id():
             return jsonify({'success': False, 'error': 'Consumazione non appartenente all\'utente'})
         
         # Calcola il peso già consumato
@@ -1382,28 +1176,26 @@ def finish_consumption():
         if response.status_code >= 400:
             raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
         
+        # Rimuovi l'ID della consumazione attiva dalla sessione
+        SessionManager.set_active_consumption(None)
+        
         return jsonify({'success': True})
     
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/get_cities', methods=['GET'])
+@login_required
 def api_get_cities():
     """Endpoint API per ottenere l'elenco delle città disponibili"""
-    if 'user' not in session:
-        return jsonify({'error': 'Non autorizzato'}), 401
-        
     cities = get_cities()
     return jsonify({'cities': cities})
 
 @app.route('/get_bars_by_city/<city>', methods=['GET'])
+@login_required
 def get_bars_by_city(city):
     """Endpoint API per ottenere i bar in una specifica città"""
     logger.info(f"Richiesta bar per città: {city}")
-    
-    if 'user' not in session:
-        logger.warning("Tentativo di accesso non autorizzato all'endpoint get_bars_by_city")
-        return jsonify({'error': 'Non autorizzato'}), 401
         
     bars = get_bars(city)
     logger.info(f"Trovati {len(bars)} bar per la città {city}")
@@ -1418,11 +1210,9 @@ def get_bars_by_city(city):
     return jsonify(response)
 
 @app.route('/nuovo_drink', methods=['GET', 'POST'])
+@login_required
 def nuovo_drink():
     # Pagina per selezionare il drink
-    if 'user' not in session:
-        flash('Devi effettuare il login per monitorare i tuoi drink')
-        return redirect(url_for('login'))
     
     # Ottieni l'elenco delle città disponibili
     cities = get_cities()
@@ -1442,11 +1232,31 @@ def nuovo_drink():
             cities=cities
         )
     
+    # Se c'è una richiesta POST, verifica se c'è una consumazione attiva prima di procedere
+    if request.method == 'POST':
+        if consumazione_attiva:
+            flash('Hai già una consumazione attiva. Completa quella attuale prima di iniziarne una nuova.', 'warning')
+            return redirect(url_for('monitora_drink'))
+    
     # Inizializza le variabili per i template
     selected_city = None
     bars = []
     selected_bar_id = None
     drinks = []
+    
+    # Controlla se c'è un bar salvato nella sessione
+    bar_id_from_session = SessionManager.get_bar_id()
+    if bar_id_from_session:
+        # Recupera i dettagli del bar
+        bar_data = get_bar_by_id(bar_id_from_session)
+        if bar_data and 'fields' in bar_data:
+            selected_city = bar_data['fields'].get('Città')
+            selected_bar_id = bar_id_from_session
+            # Recupera i bar per la città selezionata
+            if selected_city:
+                bars = get_bars(selected_city)
+                # Recupera i drink per il bar selezionato
+                drinks = get_drinks(selected_bar_id)
     
     # Gestione della selezione della città
     if request.method == 'POST' and 'city' in request.form:
@@ -1468,7 +1278,7 @@ def nuovo_drink():
         if selected_bar_id:
             logger.info(f"Bar selezionato: {selected_bar_id}")
             # Salva il bar selezionato nella sessione
-            session['selected_bar_id'] = selected_bar_id
+            SessionManager.set_bar_id(selected_bar_id)
             
             # Ottieni tutti i drink prima del filtraggio
             all_drinks = get_drinks()
@@ -1480,21 +1290,23 @@ def nuovo_drink():
                     drinks.append(drink)
             logger.info(f"Trovati {len(drinks)} drink per il bar {selected_bar_id}")
     
-    # Questo blocco è stato sostituito con il nuovo codice sopra per gestire 'city'
-    
     # Gestione del form quando viene inviato
     if request.method == 'POST' and 'drink_id' in request.form and request.form.get('drink_id'):
         # Ottieni i valori selezionati
         drink_id = request.form.get('drink_id')
         bar_id = request.form.get('bar_id')
+        stomaco = request.form.get('stomaco')
         
-        logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}")
+        logger.info(f"Drink ID: {drink_id}, Bar ID: {bar_id}, Stomaco: {stomaco}")
         
         if not drink_id or not bar_id:
             flash('Seleziona un drink e un bar prima di iniziare', 'danger')
             logger.warning("Mancano drink_id o bar_id")
         else:
-            logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}")
+            # Salva il drink_id e lo stato dello stomaco nella sessione
+            SessionManager.set_selected_drink_id(drink_id)
+            SessionManager.set_stomaco_state(stomaco)
+            logger.info(f"Avvio monitoraggio per drink_id: {drink_id}, bar_id: {bar_id}, stomaco: {stomaco}")
             # Reindirizza alla pagina di monitoraggio
             return redirect(url_for('monitora_drink', drink_id=drink_id, bar_id=bar_id))
     
@@ -1508,11 +1320,9 @@ def nuovo_drink():
     )
 
 @app.route('/monitora_drink', methods=['GET'])
+@login_required
 def monitora_drink():
     # Pagina per monitorare il consumo del drink
-    if 'user' not in session:
-        flash('Devi effettuare il login per monitorare i tuoi drink', 'danger')
-        return redirect(url_for('login'))
     
     # Controlla se c'è già una consumazione attiva
     consumazione_attiva = get_active_consumption()
@@ -1528,6 +1338,22 @@ def monitora_drink():
     if consumazione_attiva:
         consumazione_id = consumazione_attiva['id']
         drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
+        bar_id = consumazione_attiva['fields'].get('Bar', [''])[0] if 'Bar' in consumazione_attiva['fields'] else ''
+        
+        # Recupera i dati dalla sessione
+        consumption_data = SessionManager.get_consumption_data()
+        if consumption_data and consumption_data['id'] == consumazione_id:
+            return render_template(
+                'monitora_drink.html',
+                drink_id=drink_id,
+                bar_id=bar_id,
+                drink_selezionato=get_drink_by_id(drink_id),
+                bar_selezionato=get_bar_by_id(bar_id) if bar_id else None,
+                consumazione_id=consumazione_id,
+                peso_iniziale=consumption_data['peso_iniziale'],
+                volume_consumato=consumption_data['volume_consumato'],
+                sorsi=consumption_data['sorsi']
+            )
     
     # Verifica che ci sia un drink_id valido
     if not drink_id:
@@ -1541,20 +1367,22 @@ def monitora_drink():
         flash('Drink non trovato', 'danger')
         return redirect(url_for('nuovo_drink'))
     
+    # Ottieni i dettagli del bar
+    bar_selezionato = get_bar_by_id(bar_id) if bar_id else None
+    
     return render_template(
         'monitora_drink.html',
         drink_id=drink_id,
         bar_id=bar_id,
         drink_selezionato=drink_selezionato,
+        bar_selezionato=bar_selezionato,
         consumazione_id=consumazione_id
     )
 
 @app.route('/get_drinks_by_bar/<bar_id>', methods=['GET'])
+@login_required
 def get_drinks_by_bar(bar_id):
     # Endpoint API per ottenere i drink disponibili per un bar specifico
-    if 'user' not in session:
-        return jsonify({'error': 'Non autorizzato'}), 401
-    
     print(f"DEBUG: Ricevuta richiesta per drink del bar ID: {bar_id}")
     
     # Ottieni tutti i drink prima del filtraggio
@@ -1581,11 +1409,9 @@ def get_drinks_by_bar(bar_id):
     return jsonify({'drinks': formatted_drinks})
 
 @app.route('/get_drink_details/<drink_id>', methods=['GET'])
+@login_required
 def get_drink_details(drink_id):
     """Endpoint API per ottenere i dettagli di un drink specifico"""
-    if 'user' not in session:
-        return jsonify({'success': False, 'error': 'Non autorizzato'}), 401
-    
     drink = get_drink_by_id(drink_id)
     if not drink:
         return jsonify({'success': False, 'error': 'Drink non trovato'})
@@ -1598,16 +1424,15 @@ def get_drink_details(drink_id):
     })
 
 @app.route('/create_consumption', methods=['POST'])
+@login_required
 def create_consumption():
     """Crea una nuova consumazione"""
-    if 'user' not in session:
-        return jsonify({'success': False, 'error': 'Utente non autenticato'})
-    
     try:
         data = request.get_json()
         peso_iniziale = float(data.get('peso_iniziale', 0))
         drink_id = data.get('drink_id')
-        bar_id = data.get('bar_id')  # Ottieni il bar_id direttamente dal form
+        bar_id = data.get('bar_id')
+        stomaco = data.get('stomaco', 'pieno')  # Default a 'pieno' se non specificato
         
         if peso_iniziale <= 0:
             return jsonify({'success': False, 'error': 'Peso iniziale non valido. Assicurati che il bicchiere sia posizionato sul sottobicchiere.'})
@@ -1619,18 +1444,20 @@ def create_consumption():
             return jsonify({'success': False, 'error': 'Bar non selezionato'})
         
         # Recupera i dati dell'utente e del drink
-        user_id = session['user']  # user_id è direttamente in session['user']
+        user_id = SessionManager.get_user_id()
         drink = get_drink_by_id(drink_id)
         
         if not drink:
             return jsonify({'success': False, 'error': 'Drink non trovato'})
+        
+        # Salva lo stato dello stomaco nella sessione
+        SessionManager.set_stomaco_state(stomaco)
         
         # Crea una nuova consumazione in Airtable
         percentuale_alcol = float(drink['fields'].get('Percentuale', 0))
         grammi_alcol = (percentuale_alcol / 100) * peso_iniziale
         
         # Calcola il BAC stimato (molto semplificato per questo esempio)
-        # Poiché session['user'] contiene solo l'ID e non info sull'utente, utilizziamo valori di default
         peso_utente = 70  # Peso default 70kg
         genere = 'M'  # Genere default 'M'
         
@@ -1646,9 +1473,8 @@ def create_consumption():
             'Authorization': f'Bearer {AIRTABLE_API_KEY}',
             'Content-Type': 'application/json'
         }
-        # Bar_id è già ottenuto dal form JSON
             
-        # Prepara solo i dati essenziali, lasciando che Airtable gestisca i campi calcolati
+        # Prepara i dati includendo lo stato dello stomaco
         data = {
             'fields': {
                 'User': [user_id],
@@ -1657,7 +1483,7 @@ def create_consumption():
                 'Peso (g)': peso_iniziale,
                 'Tasso Calcolato (g/L)': bac,
                 'Completato': 'Non completato',
-                'Stomaco': 'Pieno'
+                'Stomaco': stomaco.capitalize()  # Capitalizza la prima lettera
             }
         }
         response = requests.post(url, json=data, headers=headers)
@@ -1666,6 +1492,22 @@ def create_consumption():
             raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
             
         consumazione = response.json()
+        
+        # Salva l'ID della consumazione attiva nella sessione
+        SessionManager.set_active_consumption(consumazione['id'])
+        
+        # Salva i dati della consumazione nella sessione
+        consumption_data = {
+            'id': consumazione['id'],
+            'drink_id': drink_id,
+            'bar_id': bar_id,
+            'peso_iniziale': peso_iniziale,
+            'volume_consumato': 0,
+            'sorsi': [],
+            'bac': bac,
+            'stomaco': stomaco
+        }
+        SessionManager.set_consumption_data(consumption_data)
         
         return jsonify({
             'success': True,
@@ -1678,17 +1520,203 @@ def create_consumption():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-# La funzione sorsi è stata spostata nella sezione precedente del file
-# e ora reindirizza a nuovo_drink
+@app.route('/drink_master')
+@login_required
+def drink_master():
+    """Pagina che mostra tutte le consumazioni dell'utente con relativi sorsi"""
+    user_id = SessionManager.get_user_id()
+    user_email = SessionManager.get_user_email()
+    
+    # Recupera tutte le consumazioni dell'utente
+    consumazioni = get_user_consumazioni(user_id)
+    
+    # Per ogni consumazione, recupera i sorsi
+    consumazioni_complete = []
+    for consumazione in consumazioni:
+        consumazione_id = consumazione['id']
+        
+        # Recupera i dettagli della consumazione
+        drink_id = consumazione['fields'].get('Drink', [''])[0] if 'Drink' in consumazione['fields'] else ''
+        drink = get_drink_by_id(drink_id) if drink_id else None
+        drink_name = drink['fields'].get('Name', 'Sconosciuto') if drink else 'Sconosciuto'
+        
+        bar_id = consumazione['fields'].get('Bar', [''])[0] if 'Bar' in consumazione['fields'] else ''
+        bar = get_bar_by_id(bar_id) if bar_id else None
+        bar_name = bar['fields'].get('Name', 'Sconosciuto') if bar else 'Sconosciuto'
+        
+        # Recupera i sorsi per questa consumazione
+        sorsi = get_sorsi_by_consumazione(consumazione_id)
+        
+        # Calcola il volume totale consumato
+        volume_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
+        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
+        volume_rimanente = max(volume_iniziale - volume_consumato, 0.0)
+        
+        # Calcola il BAC massimo raggiunto
+        bac_values = [float(sorso['fields'].get('BAC Temporaneo', 0)) for sorso in sorsi if 'BAC Temporaneo' in sorso['fields']]
+        bac_max = max(bac_values) if bac_values else 0.0
+        
+        # Timestamp della consumazione
+        created_time_str = consumazione.get('createdTime')
+        display_timestamp = 'N/D'
+        if created_time_str:
+            try:
+                dt_obj = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
+                display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
+            except ValueError:
+                display_timestamp = 'Timestamp invalido'
+        
+        # Crea un dizionario con tutti i dati della consumazione
+        consumazione_completa = {
+            'id': consumazione_id,
+            'drink_name': drink_name,
+            'bar_name': bar_name,
+            'data': display_timestamp,
+            'volume_iniziale': volume_iniziale,
+            'volume_consumato': volume_consumato,
+            'volume_rimanente': volume_rimanente,
+            'percentuale_consumata': (volume_consumato / volume_iniziale * 100) if volume_iniziale > 0 else 0,
+            'sorsi_count': len(sorsi),
+            'bac_max': round(bac_max, 3),
+            'completata': volume_rimanente <= 0,
+            'sorsi': sorsi
+        }
+        
+        consumazioni_complete.append(consumazione_completa)
+    
+    # Ordina le consumazioni per data (più recenti prima)
+    consumazioni_complete.sort(key=lambda x: x['data'], reverse=True)
+    
+    # Ricalcola il BAC corrente considerando il tempo trascorso dall'ultimo sorso
+    bac_data = SessionManager.get_bac_data()
+    bac_corrente = bac_data['bac']
+    ultima_ora = bac_data['timestamp']
+    
+    if bac_corrente > 0 and ultima_ora:
+        try:
+            # Calcola il tempo trascorso dall'ultimo sorso
+            ultima_ora_dt = datetime.fromisoformat(ultima_ora)
+            ora_attuale = datetime.now(TIMEZONE)
+            tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
+            
+            # Applica la metabolizzazione dell'alcol
+            if tempo_trascorso > 0:
+                print(f"DEBUG: Ricalcolo BAC. Valore precedente: {bac_corrente}, tempo trascorso: {tempo_trascorso} ore")
+                bac_corrente = calcola_alcol_metabolizzato(bac_corrente, tempo_trascorso)
+                print(f"DEBUG: BAC ricalcolato: {bac_corrente}")
+                
+                # Aggiorna il valore in sessione
+                SessionManager.set_bac_data(bac_corrente, ora_attuale.isoformat())
+        except Exception as e:
+            print(f"Errore nel ricalcolo del BAC: {str(e)}")
+    
+    interpretazione_bac = interpreta_tasso_alcolemico(bac_corrente)
+    
+    return render_template('drink_master.html', 
+                           email=user_email, 
+                           consumazioni=consumazioni_complete,
+                           bac_corrente=bac_corrente,
+                           interpretazione_bac=interpretazione_bac)
 
+@app.route('/game')
+@login_required
+def game():
+    # Get user data
+    user = get_user_by_id(SessionManager.get_user_id())
+    
+    # Get or create game data
+    game_data = get_game_data(SessionManager.get_user_id())
+    if not game_data:
+        game_data = create_game_data(SessionManager.get_user_id())
+        if not game_data:
+            flash('Errore durante la creazione dei dati di gioco.')
+            return redirect(url_for('home'))
+    
+    # Check and reset daily challenge if needed
+    check_and_reset_daily_challenge(game_data)
+    
+    # Get all game data for leaderboard
+    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
+    response = requests.get(url, headers=get_airtable_headers())
+    all_game_data = response.json().get('records', [])
+    
+    # Process leaderboard data - keep only latest entry per user
+    user_latest_data = {}
+    for data in all_game_data:
+        fields = data['fields']
+        user_id = fields.get('User', [''])[0]
+        if user_id:
+            # Get timestamp of this entry
+            last_updated = fields.get('Last Updated')
+            if not last_updated:
+                continue
+                
+            # If we haven't seen this user before or this is a newer entry
+            if user_id not in user_latest_data or last_updated > user_latest_data[user_id]['timestamp']:
+                user_data = get_user_by_id(user_id)
+                if user_data and 'fields' in user_data:
+                    # Calculate completed achievements
+                    achievements_completed = 0
+                    if fields.get('Safe Driver Progress', 0) >= 5:
+                        achievements_completed += 1
+                    if fields.get('Mix Master Progress', 0) >= 10:
+                        achievements_completed += 1
+                    if fields.get('Time Keeper Progress', 0) >= 20:
+                        achievements_completed += 1
+                    
+                    user_latest_data[user_id] = {
+                        'email': user_data['fields'].get('Email', 'Unknown'),
+                        'level': fields.get('Level', 1),
+                        'points': fields.get('Points', 0),
+                        'achievements_completed': achievements_completed,
+                        'total_achievements': 3,  # Total number of achievements
+                        'timestamp': last_updated,
+                        'is_current_user': user_id == SessionManager.get_user_id()  # Flag per l'utente corrente
+                    }
+    
+    # Convert to list and sort by points
+    leaderboard = list(user_latest_data.values())
+    leaderboard.sort(key=lambda x: x['points'], reverse=True)
+    # Take only top 10
+    leaderboard = leaderboard[:10]
+    
+    # Prepare game data for template
+    template_game_data = {
+        'level': game_data['fields']['Level'],
+        'points': game_data['fields']['Points'],
+        'xp': game_data['fields']['XP'],
+        'achievements': {
+            'safe_driver': {
+                'progress': game_data['fields']['Safe Driver Progress'],
+                'total': 5
+            },
+            'mix_master': {
+                'progress': game_data['fields']['Mix Master Progress'],
+                'total': 10
+            },
+            'time_keeper': {
+                'progress': game_data['fields']['Time Keeper Progress'],
+                'total': 20
+            }
+        },
+        'daily_challenge': {
+            'completed_sessions': game_data['fields']['Daily Challenge Completed'],
+            'total_sessions': 3
+        }
+    }
+    
+    return render_template('game.html', 
+                         user=user, 
+                         game_data=template_game_data,
+                         leaderboard=leaderboard)
 
 def get_consumazione_by_id(consumazione_id):
+    """Recupera una consumazione specifica da Airtable"""
     url = f'https://api.airtable.com/v0/{BASE_ID}/Consumazioni/{consumazione_id}'
     response = requests.get(url, headers=get_airtable_headers())
     if response.status_code == 200:
         return response.json()
     return None
-
 
 def get_consumazioni_by_user(user_id):
     """Wrapper function that calls get_user_consumazioni to retrieve a user's consumptions"""
@@ -1697,7 +1725,7 @@ def get_consumazioni_by_user(user_id):
 def get_sorsi_by_consumazione(consumazione_id):
     # Recupera sia i sorsi dal database che quelli in sessione (come backup)
     sorsi_da_db = get_sorsi_by_consumazione_from_airtable(consumazione_id)
-    sorsi_da_sessione = get_sorsi_by_consumazione_from_session(consumazione_id)
+    sorsi_da_sessione = SessionManager.get_sorsi_from_session(consumazione_id)
     
     # Se troviamo sorsi nel database, usiamo quelli
     if sorsi_da_db:
@@ -1731,30 +1759,134 @@ def get_sorsi_by_consumazione_from_airtable(consumazione_id):
         return filtered_records
     return []
 
-def get_sorsi_by_consumazione_from_session(consumazione_id):
-    """Recupera i sorsi dalla sessione (backup)"""
-    # Chiave per memorizzare i sorsi nella sessione
-    session_key = f'sorsi_{consumazione_id}'
-    
-    # Recupera l'elenco dei sorsi dalla sessione (o una lista vuota)
-    sorsi = session.get(session_key, [])
-    print(f'DEBUG - Trovati {len(sorsi)} sorsi in sessione per consumazione {consumazione_id}')
-    return sorsi
-
-def save_sorso_to_session(consumazione_id, sorso):
-    """Salva un sorso nella sessione come backup"""
-    # Chiave per memorizzare i sorsi nella sessione
-    session_key = f'sorsi_{consumazione_id}'
-    
-    # Recupera l'elenco corrente dei sorsi (o crea una lista vuota)
-    sorsi = session.get(session_key, [])
+def registra_sorso(consumazione_id, volume):
+    """Registra un nuovo sorso per una consumazione"""
+    try:
+        # Recupera la consumazione
+        consumazione = get_consumazione_by_id(consumazione_id)
+        if not consumazione:
+            return {'error': 'Consumazione non trovata'}
+            
+        # Verifica che la consumazione appartenga all'utente corrente
+        if consumazione['fields'].get('User', []) and consumazione['fields']['User'][0] != SessionManager.get_user_id():
+            return {'error': 'Consumazione non appartenente all\'utente'}
+            
+        # Calcola il BAC temporaneo
+        volume_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
+        sorsi_precedenti = get_sorsi_by_consumazione(consumazione_id)
+        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi_precedenti) if sorsi_precedenti else 0.0
+        
+        # Verifica che il volume non superi quello disponibile
+        if volume_consumato + volume > volume_iniziale:
+            return {'error': 'Volume superiore a quello disponibile'}
+            
+        # Recupera i dati dell'utente
+        user_id = SessionManager.get_user_id()
+        user_data = get_user_by_id(user_id)
+        if not user_data or 'fields' not in user_data:
+            return {'error': 'Dati utente non trovati'}
+            
+        peso_utente = float(user_data['fields'].get('Peso', 0))
+        genere = user_data['fields'].get('Genere', '').lower()
+        email_utente = SessionManager.get_user_email()
+        
+        # Recupera i dati del drink
+        drink_id = consumazione['fields'].get('Drink', [''])[0]
+        drink = get_drink_by_id(drink_id)
+        if not drink or 'fields' not in drink:
+            return {'error': 'Dati drink non trovati'}
+            
+        gradazione = float(drink['fields'].get('Gradazione', 0))
+        
+        # Prepara la lista delle bevande per il calcolo del BAC
+        ora_attuale = datetime.now(TIMEZONE)
+        ora_inizio = ora_attuale - timedelta(minutes=1)  # 1 minuto fa
+        ora_fine = ora_attuale
+        
+        # Prepara la lista di tutte le bevande (sorsi precedenti + nuovo sorso)
+        lista_bevande = []
+        
+        # Aggiungi i sorsi precedenti alla lista
+        if sorsi_precedenti:
+            for sorso in sorsi_precedenti:
+                if 'Ora inizio' in sorso['fields'] and 'Ora fine' in sorso['fields']:
+                    try:
+                        # Converti i timestamp ISO in datetime
+                        inizio_dt = datetime.fromisoformat(sorso['fields']['Ora inizio'].replace('Z', '+00:00'))
+                        fine_dt = datetime.fromisoformat(sorso['fields']['Ora fine'].replace('Z', '+00:00'))
+                        
+                        # Converti in formato HH:MM
+                        ora_inizio_str = inizio_dt.strftime('%H:%M')
+                        ora_fine_str = fine_dt.strftime('%H:%M')
+                        
+                        lista_bevande.append({
+                            'volume': float(sorso['fields'].get('Volume (g)', 0)),
+                            'gradazione': gradazione,  # Usa la stessa gradazione del drink
+                            'ora_inizio': ora_inizio_str,
+                            'ora_fine': ora_fine_str
+                        })
+                    except Exception as e:
+                        print(f"Errore nella conversione del timestamp per il sorso: {str(e)}")
+                        continue
     
     # Aggiungi il nuovo sorso
-    sorsi.append(sorso)
-    
-    # Salva l'elenco aggiornato nella sessione
-    session[session_key] = sorsi
-    print(f'DEBUG - Salvato sorso in sessione. Ora ci sono {len(sorsi)} sorsi per consumazione {consumazione_id}')
+        lista_bevande.append({
+            'volume': volume,
+            'gradazione': gradazione,
+            'ora_inizio': ora_inizio.strftime('%H:%M'),
+            'ora_fine': ora_fine.strftime('%H:%M')
+        })
+        
+        print(f"DEBUG - Lista bevande per calcolo BAC: {lista_bevande}")
+        
+        # Calcola il BAC cumulativo considerando tutti i sorsi
+        risultato_bac = calcola_bac_cumulativo(
+            peso=peso_utente,
+            genere=genere,
+            lista_bevande=lista_bevande,
+            stomaco=SessionManager.get_stomaco_state()
+        )
+        
+        bac_totale = risultato_bac['bac_finale']
+        print(f"DEBUG - BAC calcolato: {bac_totale}")
+        
+        # Crea il sorso in Airtable
+        url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
+        data = {
+            'records': [{
+                'fields': {
+                    'Consumazioni Id': [consumazione_id],
+                    'Volume (g)': float(volume),
+                    'Email': email_utente,
+                    'BAC Temporaneo': round(bac_totale, 3),
+                    'Ora inizio': ora_inizio.isoformat(),
+                    'Ora fine': ora_fine.isoformat()
+                }
+            }]
+        }
+        
+        print(f"DEBUG - Dati da inviare ad Airtable: {data}")  # Debug print
+        
+        response = requests.post(url, headers=get_airtable_headers(), json=data)
+        
+        if response.status_code != 200:
+            print(f"DEBUG - Errore Airtable: {response.status_code}")
+            print(f"DEBUG - Risposta Airtable: {response.text}")  # Debug print
+            return {'error': f'Errore Airtable: {response.status_code} - {response.text}'}
+            
+        sorso = response.json()['records'][0]
+        
+        # Aggiorna il BAC nella sessione
+        SessionManager.set_bac_data(bac_totale, ora_attuale.isoformat())
+        
+        # Salva anche in sessione come backup
+        SessionManager.save_sorso_to_session(consumazione_id, sorso)
+        
+        return sorso
+        
+    except Exception as e:
+        print(f"Errore durante la registrazione del sorso: {str(e)}")
+        return {'error': str(e)}
 
 def get_sorsi_giornalieri(email, consumazione_id=None):
     """Recupera tutti i sorsi dell'utente per la giornata corrente ordinati per data"""
@@ -1788,183 +1920,6 @@ def get_sorsi_giornalieri(email, consumazione_id=None):
     except Exception as e:
         print(f"Errore nel recupero dei sorsi giornalieri: {str(e)}")
         return []
-
-def registra_sorso(consumazione_id, volume):
-    try:
-        # Recupera i dati necessari
-        consumazione = get_consumazione_by_id(consumazione_id)
-        if not consumazione:
-            return None
-        
-        # Verifica che il volume totale consumato non superi il volume del drink
-        volume_drink = float(consumazione['fields']['Peso (g)'])
-        sorsi_registrati = get_sorsi_by_consumazione(consumazione_id)
-        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi_registrati) if sorsi_registrati else 0
-        
-        # Controlla se il nuovo sorso supererebbe il volume totale del drink
-        if volume_consumato + float(volume) > volume_drink:
-            print(f"Errore: volume richiesto {volume}g, ma rimangono solo {volume_drink - volume_consumato}g")
-            # Qui non restituiamo None per permettere alla funzione chiamante di gestire l'errore
-            # Creando un dizionario fittizio con un campo 'error'
-            return {'error': 'volume_exceeded', 'remaining': volume_drink - volume_consumato}
-        
-        user_id = consumazione['fields']['User'][0]
-        user = get_user_by_id(user_id)
-        if not user:
-            return None
-        
-        drink_id = consumazione['fields']['Drink'][0]
-        drink = get_drink_by_id(drink_id)
-        if not drink:
-            return None
-        
-        # Dati per il calcolo
-        # Accesso sicuro ai campi dell'utente e del drink
-        peso_utente = user['fields'].get('Peso', 70)  # Valore di default se manca
-        genere = user['fields'].get('Genere', 'M').lower()
-        gradazione = drink['fields'].get('Gradazione', 0)
-        email_utente = user['fields'].get('Email', '')
-        
-        # Recupera tutti i sorsi dell'utente per la giornata corrente
-        sorsi_giornalieri = get_sorsi_giornalieri(email_utente)
-        
-        # Usa l'ora corrente per il nuovo sorso
-        try:
-            ora_inizio = datetime.now(TIMEZONE)
-            ora_fine = ora_inizio + timedelta(minutes=1)
-        except Exception as e:
-            print(f"Errore nel calcolo delle date: {str(e)}")
-            return None
-
-        # Calcola il BAC per il nuovo sorso usando il volume del sorso
-        try:
-            bac_sorso = calcola_tasso_alcolemico_widmark(
-                peso=float(peso_utente),
-                genere=genere,
-                volume=float(volume),  # Usa il volume del sorso passato come parametro
-                gradazione=float(gradazione),
-                stomaco=consumazione['fields'].get('Stomaco', 'Pieno').lower(),
-                ora_inizio=ora_inizio.strftime('%H:%M'),
-                ora_fine=ora_fine.strftime('%H:%M')
-            )
-        except Exception as e:
-            print(f"Errore nel calcolo del BAC: {str(e)}")
-            return None
-
-        # Ottieni l'ultimo BAC cumulativo dalla sessione (questo mantiene la continuità tra i drink)
-        session_bac_key = 'bac_cumulativo_sessione'
-        bac_sessione = session.get(session_bac_key, 0.0)
-        ultima_ora_sessione = session.get('ultima_ora_bac_sessione')
-        print(f"DEBUG: BAC sessione precedente = {bac_sessione} g/L")
-        
-        # Se esiste un BAC di sessione, calcola il metabolismo dall'ultimo sorso
-        if bac_sessione > 0 and ultima_ora_sessione:
-            try:
-                ultima_ora = datetime.fromisoformat(ultima_ora_sessione)
-                tempo_trascorso = (ora_inizio - ultima_ora).total_seconds() / 3600
-                # Non utilizzare valori negativi di tempo
-                tempo_trascorso = max(0, tempo_trascorso)
-                bac_metabolizzato = calcola_alcol_metabolizzato(bac_sessione, tempo_trascorso)
-                print(f"DEBUG: BAC metabolizzato da {bac_sessione} a {bac_metabolizzato} in {tempo_trascorso} ore")
-            except Exception as e:
-                print(f"Errore nel calcolo del BAC metabolizzato dalla sessione: {str(e)}")
-                bac_metabolizzato = bac_sessione
-        else:
-            bac_metabolizzato = 0.0
-            
-        # Se non ci sono sorsi precedenti per questo drink, usa il BAC metabolizzato dalla sessione + il nuovo sorso
-        if not sorsi_giornalieri:
-            bac_totale = bac_metabolizzato + bac_sorso
-        else:
-            # Trova il sorso con l'ora di fine più vicina all'ora di inizio del nuovo sorso
-            ultimo_sorso = None
-            min_diff = float('inf')
-            
-            for sorso in sorsi_giornalieri:
-                if 'fields' in sorso and 'Ora fine' in sorso['fields']:
-                    ora_fine_sorso = datetime.fromisoformat(sorso['fields']['Ora fine'].replace('Z', '+00:00'))
-                    ora_fine_sorso = ora_fine_sorso.astimezone(TIMEZONE)
-                    diff = abs((ora_inizio - ora_fine_sorso).total_seconds())
-                    
-                    if diff < min_diff:
-                        min_diff = diff
-                        ultimo_sorso = sorso
-            
-            if ultimo_sorso:
-                bac_precedente = float(ultimo_sorso['fields'].get('BAC Temporaneo', 0.0))
-                
-                # Calcola il tempo trascorso dall'ultimo sorso
-                ora_fine_ultimo = datetime.fromisoformat(ultimo_sorso['fields']['Ora fine'].replace('Z', '+00:00'))
-                ora_fine_ultimo = ora_fine_ultimo.astimezone(TIMEZONE)
-                tempo_trascorso = (ora_inizio - ora_fine_ultimo).total_seconds() / 3600
-                
-                # Calcola l'alcol metabolizzato nel tempo trascorso
-                bac_vecchio = calcola_alcol_metabolizzato(bac_precedente, tempo_trascorso)
-                
-                # Il BAC totale è: il massimo tra BAC precedente metabolizzato e BAC sessione + BAC nuovo sorso
-                # Usiamo il massimo per evitare di perdere traccia del BAC se cambiamo drink
-                bac_totale = max(bac_vecchio, bac_metabolizzato) + bac_sorso
-                
-                print(f"DEBUG BAC: precedente={bac_precedente}, metabolizzato={bac_vecchio}, sessione={bac_metabolizzato}, nuovo sorso={bac_sorso}, totale={bac_totale}")
-            else:
-                bac_totale = bac_metabolizzato + bac_sorso
-                
-        # Limita il BAC a un valore massimo ragionevole
-        MAX_BAC = 4.0  # g/L, valore massimo plausibile per un essere umano
-        if bac_totale > MAX_BAC:
-            print(f"ATTENZIONE: BAC calcolato {bac_totale} g/L eccede il limite massimo, limitato a {MAX_BAC} g/L")
-            bac_totale = MAX_BAC
-        
-        # Aggiorna il BAC di sessione e l'orario
-        session[session_bac_key] = bac_totale
-        session['ultima_ora_bac_sessione'] = ora_fine.isoformat()
-        
-        # Registra il sorso in Airtable
-        url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'
-        
-        # Ottieni un nuovo ID incrementale per il sorso
-        last_id = 0
-        sorsi_esistenti = get_sorsi_by_consumazione(consumazione_id)
-        if sorsi_esistenti:
-            for sorso in sorsi_esistenti:
-                if 'fields' in sorso and 'Id' in sorso['fields']:
-                    sorso_id = int(sorso['fields']['Id'])
-                    if sorso_id > last_id:
-                        last_id = sorso_id
-        
-        new_id = last_id + 1
-        
-        data = {
-            'records': [{
-                'fields': {
-                    'Id': new_id,
-                    'Consumazioni Id': [consumazione_id],
-                    'Volume (g)': volume,
-                    'Email': email_utente,
-                    'BAC Temporaneo': round(bac_totale, 3),
-                    'Ora inizio': ora_inizio.isoformat(),
-                    'Ora fine': ora_fine.isoformat()
-                }
-            }]
-        }
-        
-        response = requests.post(url, headers=get_airtable_headers(), json=data)
-        
-        if response.status_code != 200:
-            print(f"Errore Airtable - Status: {response.status_code}")
-            return None
-        
-        # Otteniamo il record creato
-        created_record = response.json()['records'][0]
-        
-        # Salviamo anche in sessione come backup per la visualizzazione
-        save_sorso_to_session(consumazione_id, created_record)
-            
-        return created_record
-        
-    except Exception as e:
-        print(f"Errore durante la registrazione del sorso: {str(e)}")
-        return None
 
 def get_game_data(user_id):
     """Recupera i dati di gioco dell'utente da Airtable"""
@@ -2107,224 +2062,429 @@ def update_achievement_progress(game_data, achievement_type, progress=1):
     
     return update_game_data(game_data['id'], updates)
 
-@app.route('/game')
-def game():
-    if not session.get('user'):
-        flash('Devi effettuare il login per accedere al gioco.')
-        return redirect(url_for('login'))
-    
-    # Get user data
-    user = get_user_by_id(session.get('user'))
-    
-    # Get or create game data
-    game_data = get_game_data(session.get('user'))
-    if not game_data:
-        game_data = create_game_data(session.get('user'))
-        if not game_data:
-            flash('Errore durante la creazione dei dati di gioco.')
-            return redirect(url_for('home'))
-    
-    # Check and reset daily challenge if needed
-    check_and_reset_daily_challenge(game_data)
-    
-    # Get all game data for leaderboard
-    url = f'https://api.airtable.com/v0/{BASE_ID}/GameData'
-    response = requests.get(url, headers=get_airtable_headers())
-    all_game_data = response.json().get('records', [])
-    
-    # Process leaderboard data - keep only latest entry per user
-    user_latest_data = {}
-    for data in all_game_data:
-        fields = data['fields']
-        user_id = fields.get('User', [''])[0]
-        if user_id:
-            # Get timestamp of this entry
-            last_updated = fields.get('Last Updated')
-            if not last_updated:
-                continue
-                
-            # If we haven't seen this user before or this is a newer entry
-            if user_id not in user_latest_data or last_updated > user_latest_data[user_id]['timestamp']:
-                user_data = get_user_by_id(user_id)
-                if user_data and 'fields' in user_data:
-                    # Calculate completed achievements
-                    achievements_completed = 0
-                    if fields.get('Safe Driver Progress', 0) >= 5:
-                        achievements_completed += 1
-                    if fields.get('Mix Master Progress', 0) >= 10:
-                        achievements_completed += 1
-                    if fields.get('Time Keeper Progress', 0) >= 20:
-                        achievements_completed += 1
-                    
-                    user_latest_data[user_id] = {
-                        'email': user_data['fields'].get('Email', 'Unknown'),
-                        'level': fields.get('Level', 1),
-                        'points': fields.get('Points', 0),
-                        'achievements_completed': achievements_completed,
-                        'total_achievements': 3,  # Total number of achievements
-                        'timestamp': last_updated,
-                        'is_current_user': user_id == session.get('user')  # Flag per l'utente corrente
-                    }
-    
-    # Convert to list and sort by points
-    leaderboard = list(user_latest_data.values())
-    leaderboard.sort(key=lambda x: x['points'], reverse=True)
-    # Take only top 10
-    leaderboard = leaderboard[:10]
-    
-    # Prepare game data for template
-    template_game_data = {
-        'level': game_data['fields']['Level'],
-        'points': game_data['fields']['Points'],
-        'xp': game_data['fields']['XP'],
-        'achievements': {
-            'safe_driver': {
-                'progress': game_data['fields']['Safe Driver Progress'],
-                'total': 5
-            },
-            'mix_master': {
-                'progress': game_data['fields']['Mix Master Progress'],
-                'total': 10
-            },
-            'time_keeper': {
-                'progress': game_data['fields']['Time Keeper Progress'],
-                'total': 20
+def get_active_consumption():
+    """Recupera la consumazione attiva dell'utente corrente"""
+    active_consumption_id = SessionManager.get_active_consumption()
+    if not active_consumption_id:
+        return None
+        
+    return get_consumazione_by_id(active_consumption_id)
+
+@app.route('/partner')
+def partner():
+    return render_template('partner.html')
+
+@app.route('/register_partner', methods=['POST'])
+def register_partner():
+    try:
+        # Get form data
+        bar_name = request.form['barName']
+        email = request.form['email']
+        password = request.form['password']
+        confirm_password = request.form['confirm_password']
+        address = request.form['address']
+        city = request.form['city']
+
+        logger.info(f"[REGISTER_PARTNER] Tentativo di registrazione per: {bar_name} ({email})")
+
+        # Validate password
+        if len(password) < 8:
+            flash('La password deve contenere almeno 8 caratteri')
+            return redirect(url_for('partner'))
+        
+        if password != confirm_password:
+            flash('Le password non coincidono')
+            return redirect(url_for('partner'))
+
+        # Check if email already exists
+        url = f'https://api.airtable.com/v0/{BASE_ID}/Locali'
+        headers = get_airtable_headers()
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            existing_bars = response.json().get('records', [])
+            for bar in existing_bars:
+                if bar['fields'].get('Email') == email:
+                    flash('Email già registrata')
+                    return redirect(url_for('partner'))
+
+        # Hash the password
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+
+        # Create new bar record
+        new_bar = {
+            'fields': {
+                'Name': bar_name,
+                'Email': email,
+                'Password': hashed_password,
+                'Indirizzo': address,
+                'Città': city
             }
-        },
-        'daily_challenge': {
-            'completed_sessions': game_data['fields']['Daily Challenge Completed'],
-            'total_sessions': 3
         }
-    }
-    
-    return render_template('game.html', 
-                         user=user, 
-                         game_data=template_game_data,
-                         leaderboard=leaderboard)
 
-@app.route('/sorsi/<consumazione_id>')
-def sorsi(consumazione_id):
-    """Reindirizza alla pagina nuovo_drink poiché ora utilizziamo un approccio unificato"""
-    if 'user' not in session:
-        flash('Devi effettuare il login per accedere a questa pagina', 'danger')
-        return redirect(url_for('login'))
-    
-    # Verifica che la consumazione esista
-    consumazione = get_consumazione_by_id(consumazione_id)
-    if not consumazione:
-        flash('Consumazione non trovata', 'danger')
-        return redirect(url_for('drink_master'))
-    
-    # Verifica che la consumazione appartenga all'utente corrente
-    user_id = session['user']
-    if user_id not in consumazione['fields'].get('User', []):
-        flash('Non hai accesso a questa consumazione', 'danger')
-        return redirect(url_for('drink_master'))
-    
-    # Reindirizza alla nuova pagina unificata
-    flash('Ora utilizziamo un approccio unificato per il monitoraggio dei drink', 'info')
-    return redirect(url_for('nuovo_drink'))
-
-@app.route('/drink_master')
-def drink_master():
-    """Pagina che mostra tutte le consumazioni dell'utente con relativi sorsi"""
-    if 'user' not in session:
-        flash('Devi essere loggato')
-        return redirect(url_for('login'))
-    
-    user_id = session['user']
-    user_email = session['user_email']
-    
-    # Recupera tutte le consumazioni dell'utente
-    consumazioni = get_user_consumazioni(user_id)
-    
-    # Per ogni consumazione, recupera i sorsi
-    consumazioni_complete = []
-    for consumazione in consumazioni:
-        consumazione_id = consumazione['id']
+        # Add to Locali table
+        response = requests.post(url, headers=headers, json=new_bar)
         
-        # Recupera i dettagli della consumazione
-        drink_id = consumazione['fields'].get('Drink', [''])[0] if 'Drink' in consumazione['fields'] else ''
-        drink = get_drink_by_id(drink_id) if drink_id else None
-        drink_name = drink['fields'].get('Name', 'Sconosciuto') if drink else 'Sconosciuto'
-        
-        bar_id = consumazione['fields'].get('Bar', [''])[0] if 'Bar' in consumazione['fields'] else ''
-        bar = get_bar_by_id(bar_id) if bar_id else None
-        bar_name = bar['fields'].get('Name', 'Sconosciuto') if bar else 'Sconosciuto'
-        
-        # Recupera i sorsi per questa consumazione
-        sorsi = get_sorsi_by_consumazione(consumazione_id)
-        
-        # Calcola il volume totale consumato
-        volume_iniziale = float(consumazione['fields'].get('Peso (g)', 0))
-        volume_consumato = sum(float(sorso['fields'].get('Volume (g)', 0)) for sorso in sorsi) if sorsi else 0.0
-        volume_rimanente = max(volume_iniziale - volume_consumato, 0.0)
-        
-        # Calcola il BAC massimo raggiunto
-        bac_values = [float(sorso['fields'].get('BAC Temporaneo', 0)) for sorso in sorsi if 'BAC Temporaneo' in sorso['fields']]
-        bac_max = max(bac_values) if bac_values else 0.0
-        
-        # Timestamp della consumazione
-        created_time_str = consumazione.get('createdTime')
-        display_timestamp = 'N/D'
-        if created_time_str:
-            try:
-                dt_obj = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
-                display_timestamp = dt_obj.strftime('%d/%m/%Y %H:%M')
-            except ValueError:
-                display_timestamp = 'Timestamp invalido'
-        
-        # Crea un dizionario con tutti i dati della consumazione
-        consumazione_completa = {
-            'id': consumazione_id,
-            'drink_name': drink_name,
-            'bar_name': bar_name,
-            'data': display_timestamp,
-            'volume_iniziale': volume_iniziale,
-            'volume_consumato': volume_consumato,
-            'volume_rimanente': volume_rimanente,
-            'percentuale_consumata': (volume_consumato / volume_iniziale * 100) if volume_iniziale > 0 else 0,
-            'sorsi_count': len(sorsi),
-            'bac_max': round(bac_max, 3),
-            'completata': volume_rimanente <= 0,
-            'sorsi': sorsi
-        }
-        
-        consumazioni_complete.append(consumazione_completa)
-    
-    # Ordina le consumazioni per data (più recenti prima)
-    consumazioni_complete.sort(key=lambda x: x['data'], reverse=True)
-    
-    # Ricalcola il BAC corrente considerando il tempo trascorso dall'ultimo sorso
-    bac_corrente = session.get('bac_cumulativo_sessione', 0.0)
-    ultima_ora = session.get('ultima_ora_bac_sessione')
-    
-    if bac_corrente > 0 and ultima_ora:
-        try:
-            # Calcola il tempo trascorso dall'ultimo sorso
-            ultima_ora_dt = datetime.fromisoformat(ultima_ora)
-            ora_attuale = datetime.now(TIMEZONE)
-            tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
+        if response.status_code == 200:
+            # Now create the corresponding Bar record with only necessary fields
+            bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+            new_bar_record = {
+                'fields': {
+                    'Name': bar_name,
+                    'Città': city,
+                    'Indirizzo': address
+                }
+            }
             
-            # Applica la metabolizzazione dell'alcol
-            if tempo_trascorso > 0:
-                print(f"DEBUG: Ricalcolo BAC. Valore precedente: {bac_corrente}, tempo trascorso: {tempo_trascorso} ore")
-                bac_corrente = calcola_alcol_metabolizzato(bac_corrente, tempo_trascorso)
-                print(f"DEBUG: BAC ricalcolato: {bac_corrente}")
+            # Add to Bar table
+            bar_response = requests.post(bar_url, headers=headers, json=new_bar_record)
+            
+            if bar_response.status_code == 200:
+                flash('Registrazione completata con successo! Puoi effettuare il login con le tue credenziali.')
+                return redirect(url_for('home'))
+            else:
+                flash('Si è verificato un errore durante la sincronizzazione dei dati. Riprova più tardi.')
+                return redirect(url_for('partner'))
+        else:
+            flash('Si è verificato un errore durante la registrazione. Riprova più tardi.')
+            return redirect(url_for('partner'))
+
+    except Exception as e:
+        logger.error(f"[REGISTER_PARTNER] Errore durante la registrazione del bar: {str(e)}")
+        flash('Si è verificato un errore durante la registrazione. Riprova più tardi.')
+        return redirect(url_for('partner'))
+
+@app.route('/registra_drink', methods=['GET', 'POST'])
+@login_required
+def registra_drink():
+    # Verifica che l'utente sia un locale
+    if session.get('user_type') != 'locale':
+        flash('Accesso non autorizzato')
+        return redirect(url_for('home'))
+    
+    if request.method == 'POST':
+        try:
+            # Recupera i dati dal form
+            nome = request.form['nome']
+            gradazione = float(request.form['gradazione'])
+            ingredienti = request.form.get('ingredienti', '')
+            alcolico = 'alcolico' in request.form
+            speciale = 'speciale' in request.form
+            
+            logger.info(f"[REGISTRA_DRINK] Tentativo di registrazione drink: {nome}")
+            
+            # Ottieni il record del locale
+            locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+            locale_response = requests.get(locale_url, headers=get_airtable_headers())
+            
+            if locale_response.status_code != 200:
+                logger.error(f"[REGISTRA_DRINK] Errore nel recupero del locale: {locale_response.status_code}")
+                flash('Errore durante la registrazione del drink', 'danger')
+                return redirect(url_for('registra_drink'))
+            
+            locale_data = locale_response.json()
+            locale_name = locale_data['fields'].get('Name')
+            
+            # Cerca il bar corrispondente usando il nome
+            bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+            bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+            bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+            
+            if bar_response.status_code != 200 or not bar_response.json().get('records'):
+                logger.error(f"[REGISTRA_DRINK] Errore nel recupero del bar: {bar_response.status_code}")
+                flash('Errore durante la registrazione del drink', 'danger')
+                return redirect(url_for('registra_drink'))
+            
+            bar_id = bar_response.json()['records'][0]['id']
+            
+            # Crea il nuovo drink in Airtable
+            url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+            data = {
+                'records': [{
+                    'fields': {
+                        'Name': nome,
+                        'Gradazione': gradazione,
+                        'Ingredienti': ingredienti,
+                        'Alcolico (bool)': '1' if alcolico else '0',
+                        'Speciale (bool)': '1' if speciale else '0',
+                        'Bar': [bar_id]
+                    }
+                }]
+            }
+            
+            logger.info(f"[REGISTRA_DRINK] Dati da inviare ad Airtable: {data}")
+            
+            response = requests.post(url, headers=get_airtable_headers(), json=data)
+            
+            if response.status_code == 200:
+                logger.info(f"[REGISTRA_DRINK] Drink registrato con successo: {nome}")
+                flash('Drink registrato con successo!', 'success')
+            else:
+                logger.error(f"[REGISTRA_DRINK] Errore Airtable: {response.status_code} - {response.text}")
+                flash('Errore durante la registrazione del drink', 'danger')
                 
-                # Aggiorna il valore in sessione
-                session['bac_cumulativo_sessione'] = bac_corrente
-                session['ultima_ora_bac_sessione'] = ora_attuale.isoformat()
         except Exception as e:
-            print(f"Errore nel ricalcolo del BAC: {str(e)}")
+            logger.error(f"[REGISTRA_DRINK] Errore: {str(e)}")
+            flash('Si è verificato un errore durante la registrazione', 'danger')
     
-    interpretazione_bac = interpreta_tasso_alcolemico(bac_corrente)
+    # Recupera il nome del locale loggato
+    locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+    locale_response = requests.get(locale_url, headers=get_airtable_headers())
+    locale_data = locale_response.json()
+    locale_name = locale_data['fields'].get('Name')
     
-    return render_template('drink_master.html', 
-                           email=user_email, 
-                           consumazioni=consumazioni_complete,
-                           bac_corrente=bac_corrente,
-                           interpretazione_bac=interpretazione_bac)
+    # Cerca il bar corrispondente usando il nome
+    bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+    bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+    bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+    
+    if bar_response.status_code == 200 and bar_response.json().get('records'):
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutti i drink associati a questo bar
+        drinks_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+        drinks_response = requests.get(drinks_url, headers=get_airtable_headers())
+        
+        if drinks_response.status_code == 200:
+            all_drinks = drinks_response.json().get('records', [])
+            # Filtra i drink per questo bar
+            drinks = [drink for drink in all_drinks if bar_id in drink['fields'].get('Bar', [])]
+        else:
+            drinks = []
+    else:
+        drinks = []
+    
+    # Recupera tutti i drink non speciali
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+    response = requests.get(url, headers=get_airtable_headers())
+    all_drinks = response.json().get('records', [])
+    non_special_drinks = [drink for drink in all_drinks if drink['fields'].get('Speciale (bool)') == '0']
+    
+    # Marca i drink già collegati al bar
+    for drink in non_special_drinks:
+        drink['is_linked'] = bar_id in drink['fields'].get('Bar', [])
+    
+    return render_template('registra_drink.html', drinks=drinks, non_special_drinks=non_special_drinks)
+
+# Modifica il template base per mostrare menu diversi in base al tipo di utente
+@app.context_processor
+def inject_user_type():
+    return {
+        'is_locale': session.get('user_type') == 'locale',
+        'is_utente': session.get('user_type') == 'utente'
+    }
+
+@app.route('/link_drinks_to_bar', methods=['POST'])
+@login_required
+def link_drinks_to_bar():
+    """Collega o scollega i drink standard al bar dell'utente"""
+    if session.get('user_type') != 'locale':
+        return jsonify({'success': False, 'error': 'Accesso non autorizzato'}), 403
+    
+    try:
+        # Recupera gli ID dei drink selezionati
+        selected_drinks = request.json.get('drink_ids', [])
+        
+        # Recupera il nome del locale loggato
+        locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+        locale_response = requests.get(locale_url, headers=get_airtable_headers())
+        locale_data = locale_response.json()
+        locale_name = locale_data['fields'].get('Name')
+        
+        # Cerca il bar corrispondente usando il nome
+        bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+        bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+        bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+        
+        if bar_response.status_code != 200 or not bar_response.json().get('records'):
+            return jsonify({'success': False, 'error': 'Bar non trovato'}), 404
+        
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutti i drink non speciali
+        drinks_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+        drinks_response = requests.get(drinks_url, headers=get_airtable_headers())
+        all_drinks = drinks_response.json().get('records', [])
+        non_special_drinks = [drink for drink in all_drinks if drink['fields'].get('Speciale (bool)') == '0']
+        
+        # Per ogni drink non speciale
+        for drink in non_special_drinks:
+            drink_id = drink['id']
+            current_bars = drink['fields'].get('Bar', [])
+            
+            # Se il drink è tra quelli selezionati e non è già collegato al bar
+            if drink_id in selected_drinks and bar_id not in current_bars:
+                current_bars.append(bar_id)
+                # Aggiorna il drink per aggiungere il bar
+                update_data = {
+                    'fields': {
+                        'Bar': current_bars
+                    }
+                }
+                update_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks/{drink_id}'
+                update_response = requests.patch(update_url, headers=get_airtable_headers(), json=update_data)
+                
+                if update_response.status_code != 200:
+                    logger.error(f"Errore nell'aggiunta del bar al drink {drink_id}: {update_response.text}")
+            
+            # Se il drink non è tra quelli selezionati ed è collegato al bar
+            elif drink_id not in selected_drinks and bar_id in current_bars:
+                current_bars.remove(bar_id)
+                # Aggiorna il drink per rimuovere il bar
+                update_data = {
+                    'fields': {
+                        'Bar': current_bars
+                    }
+                }
+                update_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks/{drink_id}'
+                update_response = requests.patch(update_url, headers=get_airtable_headers(), json=update_data)
+                
+                if update_response.status_code != 200:
+                    logger.error(f"Errore nella rimozione del bar dal drink {drink_id}: {update_response.text}")
+        
+        return jsonify({'success': True, 'message': 'Drink aggiornati con successo'})
+        
+    except Exception as e:
+        logger.error(f"Errore nell'aggiornamento dei drink: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/statistica')
+@login_required
+def statistica():
+    """Pagina delle statistiche per i bar"""
+    # Verifica che l'utente sia un locale
+    if session.get('user_type') != 'locale':
+        flash('Accesso non autorizzato')
+        return redirect(url_for('home'))
+    
+    try:
+        # Recupera il nome del locale loggato
+        locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+        locale_response = requests.get(locale_url, headers=get_airtable_headers())
+        locale_data = locale_response.json()
+        locale_name = locale_data['fields'].get('Name')
+        
+        # Cerca il bar corrispondente usando il nome
+        bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+        bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+        bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+        
+        if bar_response.status_code != 200 or not bar_response.json().get('records'):
+            flash('Errore nel recupero dei dati del bar', 'danger')
+            return redirect(url_for('home'))
+        
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutte le consumazioni per questo bar
+        consumazioni = get_user_consumazioni(bar_id=bar_id)
+        
+        # Inizializza le variabili per le statistiche
+        totale_consumazioni = len(consumazioni)
+        drink_stats = {}
+        bac_values = []
+        totale_sorsi = 0
+        
+        # Analizza ogni consumazione
+        for cons in consumazioni:
+            drink_id = cons['fields'].get('Drink', [''])[0]
+            if drink_id:
+                drink = get_drink_by_id(drink_id)
+                if drink:
+                    drink_name = drink['fields'].get('Name', 'Sconosciuto')
+                    if drink_name not in drink_stats:
+                        drink_stats[drink_name] = {
+                            'consumazioni': 0,
+                            'sorsi': 0,
+                            'tassi': [],
+                            'positivi': 0
+                        }
+                    
+                    drink_stats[drink_name]['consumazioni'] += 1
+                    
+                    # Recupera i sorsi per questa consumazione
+                    sorsi = get_sorsi_by_consumazione(cons['id'])
+                    drink_stats[drink_name]['sorsi'] += len(sorsi)
+                    totale_sorsi += len(sorsi)
+                    
+                    # Analizza i tassi alcolemici
+                    for sorso in sorsi:
+                        bac = float(sorso['fields'].get('BAC Temporaneo', 0))
+                        drink_stats[drink_name]['tassi'].append(bac)
+                        bac_values.append(bac)
+                        if bac > 0.5:  # Limite legale
+                            drink_stats[drink_name]['positivi'] += 1
+        
+        # Calcola le statistiche generali
+        media_sorsi_per_drink = totale_sorsi / totale_consumazioni if totale_consumazioni > 0 else 0
+        tasso_medio = sum(bac_values) / len(bac_values) if bac_values else 0
+        
+        # Prepara i dati per i grafici
+        drink_labels = []
+        drink_data = []
+        dettaglio_drink = []
+        
+        for drink_name, stats in sorted(drink_stats.items(), key=lambda x: x[1]['consumazioni'], reverse=True):
+            drink_labels.append(drink_name)
+            drink_data.append(stats['consumazioni'])
+            
+            # Calcola le statistiche per drink
+            media_sorsi = stats['sorsi'] / stats['consumazioni'] if stats['consumazioni'] > 0 else 0
+            tasso_medio_drink = sum(stats['tassi']) / len(stats['tassi']) if stats['tassi'] else 0
+            percentuale_positivi = (stats['positivi'] / stats['consumazioni'] * 100) if stats['consumazioni'] > 0 else 0
+            
+            dettaglio_drink.append({
+                'nome': drink_name,
+                'consumazioni': stats['consumazioni'],
+                'media_sorsi': media_sorsi,
+                'tasso_medio': tasso_medio_drink,
+                'percentuale_positivi': percentuale_positivi
+            })
+        
+        # Prepara i dati per il grafico della distribuzione BAC
+        bac_ranges = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0), (1.0, float('inf'))]
+        bac_labels = ['0-0.2', '0.2-0.4', '0.4-0.6', '0.6-0.8', '0.8-1.0', '>1.0']
+        bac_data = [0] * len(bac_ranges)
+        
+        for bac in bac_values:
+            for i, (min_bac, max_bac) in enumerate(bac_ranges):
+                if min_bac <= bac < max_bac:
+                    bac_data[i] += 1
+                    break
+        
+        return render_template('statistica.html',
+                             totale_consumazioni=totale_consumazioni,
+                             drink_popolari=drink_labels[:5],
+                             media_sorsi_per_drink=media_sorsi_per_drink,
+                             tasso_medio=tasso_medio,
+                             drink_labels=drink_labels,
+                             drink_data=drink_data,
+                             bac_labels=bac_labels,
+                             bac_data=bac_data,
+                             dettaglio_drink=dettaglio_drink)
+                             
+    except Exception as e:
+        logger.error(f"Errore nella pagina statistiche: {str(e)}")
+        flash('Si è verificato un errore nel caricamento delle statistiche', 'danger')
+        return redirect(url_for('home'))
+
+@app.route('/set_selected_bar', methods=['POST'])
+@login_required
+def set_selected_bar():
+    """Salva il bar selezionato nella sessione"""
+    try:
+        data = request.get_json()
+        bar_id = data.get('bar_id')
+        
+        if not bar_id:
+            return jsonify({'success': False, 'error': 'Bar ID non fornito'}), 400
+            
+        # Salva il bar nella sessione
+        SessionManager.set_bar_id(bar_id)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Errore nel salvataggio del bar selezionato: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

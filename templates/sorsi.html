@@ -229,9 +229,9 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // Usa safe JSON parsing per evitare problemi di sintassi
-        let volumeIniziale = parseFloat({{ volume_iniziale|tojson }});
-        let volumeConsumato = parseFloat({{ volume_consumato|tojson }});
-        let volumeRimanente = parseFloat({{ volume_rimanente|tojson }});
+        let volumeIniziale = parseFloat({{ volume_iniziale, tojson }});
+        let volumeConsumato = parseFloat({{ volume_consumato, tojson }});
+        let volumeRimanente = parseFloat({{ volume_rimanente, tojson }});
         console.log('DEBUG volumeIniziale:', volumeIniziale, 'volumeConsumato:', volumeConsumato, 'volumeRimanente:', volumeRimanente);
 
         // Aggiorna il testo del volume rimanente

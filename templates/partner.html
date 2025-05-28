@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}SAFESIP - Diventa Partner{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --primary-pastel: #A8D8EA;
+        --secondary-pastel: #AA96DA;
+        --accent-pastel: #FCBAD3;
+        --light-pastel: #FFFFD2;
+        --text-color: #2C3E50;
+    }
+
+    body {
+        font-family: 'Montserrat', sans-serif;
+    }
+
+    .partner-section {
+        background: linear-gradient(135deg, var(--primary-pastel) 0%, var(--secondary-pastel) 100%);
+        padding: 80px 0;
+        margin-bottom: 60px;
+        color: var(--text-color);
+    }
+
+    .partner-title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        line-height: 1.2;
+    }
+
+    .partner-subtitle {
+        font-size: 1.2rem;
+        margin-bottom: 2rem;
+        opacity: 0.9;
+    }
+
+    .form-card {
+        background: white;
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        margin-bottom: 40px;
+    }
+
+    .form-label {
+        font-weight: 500;
+        color: var(--text-color);
+    }
+
+    .form-control {
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #ddd;
+    }
+
+    .form-control:focus {
+        border-color: var(--secondary-pastel);
+        box-shadow: 0 0 0 0.2rem rgba(170, 150, 218, 0.25);
+    }
+
+    .btn-partner {
+        background: var(--secondary-pastel);
+        border: none;
+        padding: 12px 30px;
+        border-radius: 30px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+
+    .btn-partner:hover {
+        background: var(--primary-pastel);
+        transform: translateY(-2px);
+    }
+
+    .benefits-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .benefits-list li {
+        margin-bottom: 15px;
+        padding-left: 30px;
+        position: relative;
+    }
+
+    .benefits-list li:before {
+        content: '✓';
+        color: var(--secondary-pastel);
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+    }
+
+    @media (max-width: 767.98px) {
+        .partner-section {
+            padding: 40px 0;
+        }
+        .partner-title {
+            font-size: 2rem;
+        }
+        .form-card {
+            padding: 20px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+    <!-- Partner Hero Section -->
+    <section class="partner-section">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 text-center">
+                    <h1 class="partner-title">Diventa Partner SAFESIP</h1>
+                    <p class="partner-subtitle">Unisciti alla rete di locali che promuovono il consumo responsabile di alcol</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Partner Form Section -->
+    <section class="container mb-5">
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="form-card">
+                    <h2 class="mb-4">Registra il tuo locale</h2>
+                    <form action="{{ url_for('register_partner') }}" method="POST" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label for="barName" class="form-label">Nome del Bar</label>
+                            <input type="text" class="form-control" id="barName" name="barName" required>
+                            <div class="form-text">Il nome del tuo locale</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                            <div class="form-text">Email di contatto del bar</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                            <div class="form-text">La password deve contenere almeno 8 caratteri</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirm_password" class="form-label">Conferma Password</label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="address" class="form-label">Indirizzo</label>
+                            <input type="text" class="form-control" id="address" name="address" required>
+                            <div class="form-text">Indirizzo completo del bar</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="city" class="form-label">Città</label>
+                            <input type="text" class="form-control" id="city" name="city" required>
+                            <div class="form-text">Città dove si trova il bar</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Invia richiesta</button>
+                    </form>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="form-card">
+                    <h2 class="mb-4">Vantaggi per i Partner</h2>
+                    <ul class="benefits-list">
+                        <li>Accesso esclusivo alla piattaforma SAFESIP</li>
+                        <li>Kit di sottobicchieri smart personalizzati</li>
+                        <li>Dashboard dedicata per monitorare l'utilizzo</li>
+                        <li>Promozione del tuo locale sulla nostra app</li>
+                        <li>Supporto tecnico dedicato</li>
+                        <li>Statistiche dettagliate sui consumi</li>
+                        <li>Possibilità di creare eventi e promozioni</li>
+                    </ul>
+                    <div class="mt-4">
+                        <h3 class="h5 mb-3">Per maggiori informazioni</h3>
+                        <p>Contattaci al numero: <strong>+39 XXX XXX XXXX</strong></p>
+                        <p>Email: <strong>partner@safesip.it</strong></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+{% endblock %} 

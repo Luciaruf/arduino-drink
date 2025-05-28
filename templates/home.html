@@ -232,9 +232,11 @@
                     <h2 class="section-title">Unisciti alla Rivoluzione SAFESIP</h2>
                     <p class="lead mb-4">Scegli se diventare partner o utilizzare il servizio come consumatore.</p>
                     <div class="d-flex justify-content-center gap-4">
-                        <a href="https://safesip.it/partner" class="btn btn-primary btn-lg" target="_blank">
-                            <i class="bi bi-building"></i> Diventa Partner
-                        </a>
+                        {% if not session.user %}
+                            <a href="{{ url_for('partner') }}" class="btn btn-primary btn-lg">
+                                <i class="bi bi-building"></i> Diventa Partner
+                            </a>
+                        {% endif %}
                         <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">
                             <i class="bi bi-person-plus"></i> Registrati
                         </a>

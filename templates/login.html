@@ -10,6 +10,23 @@
                 <h2 class="card-title text-center mb-4"><i class="bi bi-box-arrow-in-right me-2"></i> Login</h2>
                 <form method="post" action="{{ url_for('login') }}">
                     <div class="mb-3">
+                        <label class="form-label"><i class="bi bi-person-badge me-2"></i>Tipo di Account</label>
+                        <div class="d-flex gap-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user_type" id="user_type_utente" value="utente" checked>
+                                <label class="form-check-label" for="user_type_utente">
+                                    <i class="bi bi-person me-2"></i>Utente
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user_type" id="user_type_locale" value="locale">
+                                <label class="form-check-label" for="user_type_locale">
+                                    <i class="bi bi-building me-2"></i>Locale
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
                         <label for="email" class="form-label"><i class="bi bi-envelope me-2"></i>Email</label>
                         <input type="email" class="form-control" id="email" name="email" required>
                     </div>
