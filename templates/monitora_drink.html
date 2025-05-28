@@ -489,9 +489,9 @@
             if (data.success) {
                 updateStatusMessage('Consumazione completata con successo!', 'success');
                 
-                // Reindirizza alla pagina principale dopo qualche secondo
+                // Reindirizza alla pagina drink_master dopo qualche secondo
                 setTimeout(() => {
-                    window.location.href = '/world';
+                    window.location.href = '/drink_master';
                 }, 3000);
             } else {
                 updateStatusMessage('Errore: ' + data.error, 'danger');

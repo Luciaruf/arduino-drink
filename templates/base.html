@@ -184,11 +184,7 @@
                         <span class="text-muted">Nessun bar selezionato</span>
                     {% endif %}
                 </div>
-                {% if session.get('bar_id') %}
-                    <a href="{{ url_for('nuovo_drink') }}" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-arrow-repeat"></i> Cambia Bar
-                    </a>
-                {% endif %}
+                <!-- Il pulsante "Cambia Bar" è stato rimosso -->
             </div>
         </div>
         {% endif %}

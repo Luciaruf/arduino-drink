@@ -1070,6 +1070,7 @@ def registra_sorso_ajax(consumazione_id):
         # Aggiorna i dati nella sessione
         consumption_data = SessionManager.get_consumption_data()
         if consumption_data and consumption_data['id'] == consumazione_id:
+            # Aggiorna i dati della consumazione
             consumption_data['sorsi'].append({
                 'volume': volume,
                 'timestamp': sorso['fields'].get('Ora inizio', ''),
@@ -1077,6 +1078,12 @@ def registra_sorso_ajax(consumazione_id):
             })
             consumption_data['volume_consumato'] = sum(float(s['volume']) for s in consumption_data['sorsi'])
             SessionManager.set_consumption_data(consumption_data)
+        
+        # Salva il BAC aggiornato nella sessione
+        bac_value = float(sorso['fields'].get('BAC Temporaneo', 0))
+        ora_attuale = datetime.now(TIMEZONE)
+        SessionManager.set_bac_data(bac_value, ora_attuale.isoformat())
+        print(f"DEBUG - BAC {bac_value} salvato nella sessione con timestamp {ora_attuale.isoformat()}")
         
         return jsonify({
             'success': True,
@@ -1566,6 +1573,15 @@ def drink_master():
             except ValueError:
                 display_timestamp = 'Timestamp invalido'
         
+        # Determina se la consumazione è completata basandosi sul campo in Airtable
+        is_completata = 'Completato' in consumazione['fields'].get('Completato', '')
+        
+        # Calcola la percentuale consumata
+        percentuale_reale = (volume_consumato / volume_iniziale * 100) if volume_iniziale > 0 else 0
+        
+        # Se la consumazione è completata, imposta la percentuale al 100%
+        percentuale_visualizzata = 100 if is_completata else percentuale_reale
+        
         # Crea un dizionario con tutti i dati della consumazione
         consumazione_completa = {
             'id': consumazione_id,
@@ -1575,10 +1591,10 @@ def drink_master():
             'volume_iniziale': volume_iniziale,
             'volume_consumato': volume_consumato,
             'volume_rimanente': volume_rimanente,
-            'percentuale_consumata': (volume_consumato / volume_iniziale * 100) if volume_iniziale > 0 else 0,
+            'percentuale_consumata': percentuale_visualizzata,  # Usa 100% se completata
             'sorsi_count': len(sorsi),
             'bac_max': round(bac_max, 3),
-            'completata': volume_rimanente <= 0,
+            'completata': is_completata,  # Controlla solo il campo Completato
             'sorsi': sorsi
         }
         
@@ -1587,28 +1603,68 @@ def drink_master():
     # Ordina le consumazioni per data (più recenti prima)
     consumazioni_complete.sort(key=lambda x: x['data'], reverse=True)
     
-    # Ricalcola il BAC corrente considerando il tempo trascorso dall'ultimo sorso
+    # Ricalcola il BAC corrente prendendo in considerazione tutti i sorsi recenti e la metabolizzazione
+    # Recupera prima i dati della sessione per il BAC corrente
     bac_data = SessionManager.get_bac_data()
-    bac_corrente = bac_data['bac']
+    bac_dalla_sessione = bac_data['bac']
     ultima_ora = bac_data['timestamp']
     
-    if bac_corrente > 0 and ultima_ora:
-        try:
-            # Calcola il tempo trascorso dall'ultimo sorso
-            ultima_ora_dt = datetime.fromisoformat(ultima_ora)
-            ora_attuale = datetime.now(TIMEZONE)
-            tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
-            
-            # Applica la metabolizzazione dell'alcol
-            if tempo_trascorso > 0:
-                print(f"DEBUG: Ricalcolo BAC. Valore precedente: {bac_corrente}, tempo trascorso: {tempo_trascorso} ore")
-                bac_corrente = calcola_alcol_metabolizzato(bac_corrente, tempo_trascorso)
-                print(f"DEBUG: BAC ricalcolato: {bac_corrente}")
+    print(f"DEBUG: BAC dalla sessione: {bac_dalla_sessione}, ultimo aggiornamento: {ultima_ora}")
+    
+    # Recupera tutti i sorsi delle ultime 24 ore per ricalcolare il BAC cumulativo
+    email_utente = SessionManager.get_user_email()
+    sorsi_recenti = get_sorsi_giornalieri(email_utente)
+    
+    if sorsi_recenti:
+        print(f"DEBUG: Trovati {len(sorsi_recenti)} sorsi recenti per l'utente")
+        
+        # Ordina i sorsi per timestamp crescente
+        sorsi_recenti.sort(key=lambda x: x['fields'].get('Ora inizio', '') if 'fields' in x and 'Ora inizio' in x['fields'] else '')
+        
+        # Prendi il BAC dell'ultimo sorso come punto di partenza
+        ultimo_sorso = sorsi_recenti[-1]
+        bac_corrente = float(ultimo_sorso['fields'].get('BAC Temporaneo', 0)) if 'fields' in ultimo_sorso and 'BAC Temporaneo' in ultimo_sorso['fields'] else 0.0
+        timestamp_ultimo = ultimo_sorso['fields'].get('Ora fine', '') if 'fields' in ultimo_sorso and 'Ora fine' in ultimo_sorso['fields'] else None
+        
+        if timestamp_ultimo:
+            try:
+                # Calcola il tempo trascorso dall'ultimo sorso
+                ultima_ora_dt = datetime.fromisoformat(timestamp_ultimo.replace('Z', '+00:00'))
+                ora_attuale = datetime.now(TIMEZONE)
+                tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
                 
-                # Aggiorna il valore in sessione
-                SessionManager.set_bac_data(bac_corrente, ora_attuale.isoformat())
-        except Exception as e:
-            print(f"Errore nel ricalcolo del BAC: {str(e)}")
+                # Applica la metabolizzazione dell'alcol
+                if tempo_trascorso > 0:
+                    print(f"DEBUG: Ricalcolo BAC. Valore dall'ultimo sorso: {bac_corrente}, tempo trascorso: {tempo_trascorso} ore")
+                    bac_corrente = calcola_alcol_metabolizzato(bac_corrente, tempo_trascorso)
+                    print(f"DEBUG: BAC ricalcolato dopo metabolizzazione: {bac_corrente}")
+            except Exception as e:
+                print(f"Errore nel ricalcolo del BAC dall'ultimo sorso: {str(e)}")
+                # In caso di errore, usa il BAC dalla sessione
+                bac_corrente = bac_dalla_sessione
+    else:
+        # Se non ci sono sorsi recenti, usa il BAC dalla sessione e applica la metabolizzazione
+        bac_corrente = bac_dalla_sessione
+        
+        if bac_corrente > 0 and ultima_ora:
+            try:
+                # Calcola il tempo trascorso dall'ultimo aggiornamento del BAC
+                ultima_ora_dt = datetime.fromisoformat(ultima_ora)
+                ora_attuale = datetime.now(TIMEZONE)
+                tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
+                
+                # Applica la metabolizzazione dell'alcol
+                if tempo_trascorso > 0:
+                    print(f"DEBUG: Ricalcolo BAC dalla sessione. Valore precedente: {bac_corrente}, tempo trascorso: {tempo_trascorso} ore")
+                    bac_corrente = calcola_alcol_metabolizzato(bac_corrente, tempo_trascorso)
+                    print(f"DEBUG: BAC ricalcolato dalla sessione: {bac_corrente}")
+            except Exception as e:
+                print(f"Errore nel ricalcolo del BAC dalla sessione: {str(e)}")
+    
+    # Aggiorna il valore in sessione
+    ora_attuale = datetime.now(TIMEZONE)
+    SessionManager.set_bac_data(bac_corrente, ora_attuale.isoformat())
+    print(f"DEBUG: BAC finale {bac_corrente} salvato nella sessione con timestamp {ora_attuale.isoformat()}")
     
     interpretazione_bac = interpreta_tasso_alcolemico(bac_corrente)
     
@@ -1829,7 +1885,30 @@ def registra_sorso(consumazione_id, volume):
                         print(f"Errore nella conversione del timestamp per il sorso: {str(e)}")
                         continue
     
-    # Aggiungi il nuovo sorso
+        # Ottieni il BAC residuo dalle consumazioni precedenti
+        bac_data = SessionManager.get_bac_data()
+        bac_residuo = 0.0
+        ultima_ora = None
+        
+        if bac_data:
+            bac_residuo = bac_data['bac']
+            ultima_ora = bac_data['timestamp']
+            
+            # Se c'è un BAC residuo, calcola quanto è stato metabolizzato
+            if bac_residuo > 0 and ultima_ora:
+                try:
+                    ultima_ora_dt = datetime.fromisoformat(ultima_ora)
+                    tempo_trascorso = (ora_attuale - ultima_ora_dt).total_seconds() / 3600  # in ore
+                    
+                    # Applica la metabolizzazione dell'alcol
+                    if tempo_trascorso > 0:
+                        print(f"DEBUG - BAC residuo prima della metabolizzazione: {bac_residuo}, tempo trascorso: {tempo_trascorso} ore")
+                        bac_residuo = calcola_alcol_metabolizzato(bac_residuo, tempo_trascorso)
+                        print(f"DEBUG - BAC residuo dopo la metabolizzazione: {bac_residuo}")
+                except Exception as e:
+                    print(f"Errore nel calcolo del BAC residuo: {str(e)}")
+        
+        # Aggiungi il nuovo sorso
         lista_bevande.append({
             'volume': volume,
             'gradazione': gradazione,
@@ -1838,6 +1917,7 @@ def registra_sorso(consumazione_id, volume):
         })
         
         print(f"DEBUG - Lista bevande per calcolo BAC: {lista_bevande}")
+        print(f"DEBUG - BAC residuo considerato: {bac_residuo}")
         
         # Calcola il BAC cumulativo considerando tutti i sorsi
         risultato_bac = calcola_bac_cumulativo(
@@ -1847,8 +1927,9 @@ def registra_sorso(consumazione_id, volume):
             stomaco=SessionManager.get_stomaco_state()
         )
         
-        bac_totale = risultato_bac['bac_finale']
-        print(f"DEBUG - BAC calcolato: {bac_totale}")
+        # Aggiungi il BAC residuo al risultato
+        bac_totale = risultato_bac['bac_finale'] + bac_residuo
+        print(f"DEBUG - BAC calcolato: {bac_totale} (di cui {bac_residuo} residuo)")
         
         # Crea il sorso in Airtable
         url = f'https://api.airtable.com/v0/{BASE_ID}/Sorsi'

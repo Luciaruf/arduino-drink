@@ -4,90 +4,35 @@
 
 {% block extra_css %}
 <style>
-    /* Stili per l'indicatore di BAC a step */
-    .bac-steps-container {
+    /* Stili per la barra del BAC */
+    .bac-meter {
         position: relative;
-        margin: 30px 0;
-        padding: 20px 0;
+        margin: 20px 0 40px 0;
     }
     
-    .bac-steps {
-        display: flex;
-        height: 30px;
-        border-radius: 15px;
-        overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .bac-value {
+        font-weight: bold;
+        font-size: 1.2rem;
     }
     
-    .bac-step {
-        flex: 1;
-        height: 100%;
-        border-right: 1px solid rgba(255, 255, 255, 0.5);
-        transition: all 0.3s ease;
-    }
-    
-    .bac-step:hover {
-        filter: brightness(1.1);
-    }
-    
-    .bac-step:last-child {
-        border-right: none;
-    }
-    
-    .bac-indicator {
+    .legal-limit-line {
         position: absolute;
         top: 0;
-        width: 12px;
-        height: 70px;
-        background-color: #333;
-        border-radius: 6px;
-        transform: translateX(-50%);
-        transition: left 0.5s ease-in-out;
+        height: 40px;
+        width: 3px;
+        background-color: #dc3545;
         z-index: 10;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     
-    .bac-indicator:after {
-        content: '';
+    .legal-limit-text {
         position: absolute;
-        bottom: -10px;
-        left: 50%;
+        bottom: -25px;
         transform: translateX(-50%);
-        border-left: 10px solid transparent;
-        border-right: 10px solid transparent;
-        border-top: 10px solid #333;
-    }
-    
-    .bac-labels {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 15px;
-        padding: 0 5px;
-    }
-    
-    .bac-labels div {
-        font-size: 0.85rem;
-        color: #666;
-        font-weight: 500;
-    }
-
-    .bac-level-info {
-        position: absolute;
-        top: -30px;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: #333;
+        background-color: #dc3545;
         color: white;
-        padding: 4px 8px;
+        padding: 2px 8px;
         border-radius: 4px;
-        font-size: 0.8rem;
-        opacity: 0;
-        transition: opacity 0.3s ease;
-        pointer-events: none;
-    }
-
-    .bac-indicator:hover .bac-level-info {
-        opacity: 1;
+        font-size: 12px;
     }
 
     /* Stili per la barra di progresso */
@@ -155,80 +100,26 @@
         </div>
         <div class="card-body">
             <div class="row align-items-center">
-                <div class="col-md-6">
+                <div class="col-md-12">
                     <h2 class="display-4">{{ bac_corrente|round(3) }} g/L</h2>
-                    <p class="lead">
-                        Stato: 
-                        {% if interpretazione_bac %}
-                            <span class="badge 
-                                {% if interpretazione_bac.livello == 'Sobrio' %}
-                                    bg-success
-                                {% elif interpretazione_bac.livello == 'Leggermente alterato' %}
-                                    bg-warning
-                                {% elif interpretazione_bac.livello == 'Alterato' %}
-                                    bg-warning text-dark
-                                {% elif interpretazione_bac.livello == 'Molto alterato' %}
-                                    bg-danger
-                                {% elif interpretazione_bac.livello == 'Altamente intossicato' %}
-                                    bg-danger
-                                {% elif interpretazione_bac.livello == 'Coma etilico' %}
-                                    bg-dark
-                                {% else %}
-                                    bg-secondary
-                                {% endif %}
-                            ">{{ interpretazione_bac.livello }}</span>
-                        {% else %}
-                            <span class="badge bg-secondary">Non disponibile</span>
-                        {% endif %}
-                    </p>
-                    {% if interpretazione_bac %}
-                        <p>{{ interpretazione_bac.descrizione }}</p>
+                    
+                    {% if bac_corrente < 0.2 %}
+                        <div class="alert alert-success">Sei sobrio! (0.0-0.2 g/L)</div>
+                    {% elif bac_corrente < 0.3 %}
+                        <div class="alert alert-info">Sei leggermente alterato (0.2-0.3 g/L)</div>
+                    {% elif bac_corrente < 0.45 %}
+                        <div class="alert alert-warning">Sei quasi al limite legale (0.3-0.45 g/L)</div>
+                    {% elif bac_corrente < 0.5 %}
+                        <div class="alert alert-danger">Sei molto vicino al limite legale (0.45-0.5 g/L)</div>
+                    {% else %}
+                        <div class="alert alert-dark">Sei oltre il limite legale (>0.5 g/L)</div>
                     {% endif %}
-                    <form action="{{ url_for('drink_master') }}" method="GET" class="mt-3">
+                    
+                    <form action="{{ url_for('drink_master') }}" method="get" class="mt-3">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-arrow-clockwise me-1"></i> Ricalcola BAC
                         </button>
                     </form>
-                </div>
-                <div class="col-md-6">
-                    <!-- Indicatore di livello BAC a step -->
-                    <div class="bac-steps-container mt-3">
-                        <div class="bac-steps">
-                            <div class="bac-step bg-success" data-level="0.0-0.2" data-bs-toggle="tooltip" title="Sobrio (0.0-0.2 g/L) - Nessun effetto evidente"></div>
-                            <div class="bac-step bg-info" data-level="0.2-0.3" data-bs-toggle="tooltip" title="Leggermente alterato (0.2-0.3 g/L) - Leggera euforia"></div>
-                            <div class="bac-step bg-warning" data-level="0.3-0.45" data-bs-toggle="tooltip" title="Quasi al limite legale (0.3-0.45 g/L) - Attenzione: effetti evidenti"></div>
-                            <div class="bac-step bg-danger" data-level="0.45-0.5" data-bs-toggle="tooltip" title="Vicino al limite legale (0.45-0.5 g/L) - Non mettersi alla guida"></div>
-                            <div class="bac-step bg-dark" data-level="0.5+" data-bs-toggle="tooltip" title="Oltre il limite legale (>0.5 g/L) - Guida vietata"></div>
-                        </div>
-                        
-                        <!-- Indicatore della posizione attuale -->
-                        {% set position = (bac_corrente / 4.0 * 100)|round|int %}
-                        {% set position = [position, 100]|min %}
-                        {% set position = [position, 0]|max %}
-                        <div class="bac-indicator" data-position="{{ position }}">
-                            <div class="bac-level-info">{{ bac_corrente|round(3) }} g/L</div>
-                        </div>
-                        
-                        <!-- Etichette -->
-                        <div class="bac-labels">
-                            <div>0.0</div>
-                            <div>0.5</div>
-                            <div>1.0</div>
-                            <div>2.0</div>
-                            <div>3.0</div>
-                            <div>4.0</div>
-                        </div>
-
-                        <!-- Indicatore limite legale -->
-                        <div class="legal-limit-marker" style="left: 12.5%">
-                            <div class="legal-limit-label">Limite legale</div>
-                        </div>
-                    </div>
-                    
-                    <small class="text-muted mt-2 d-block">
-                        <i class="fas fa-info-circle me-1"></i>
-                        Limite legale per la guida: 0.5 g/L
-                    </small>
                 </div>
             </div>
         </div>
@@ -286,13 +177,9 @@
         </div>
     </div>
     
-    <!-- Pulsante per tornare alla selezione del bar -->
+    <!-- Spazio per eventuali pulsanti futuri -->
     <div class="text-center mt-4">
-        {% if session.get('bar_id') %}
-            <a href="{{ url_for('nuovo_drink') }}" class="btn btn-outline-primary btn-sm">
-                <i class="bi bi-arrow-repeat"></i> Cambia Bar
-            </a>
-        {% endif %}
+        <!-- Il pulsante "Cambia Bar" è stato rimosso -->
     </div>
 </div>
 {% endblock %}
@@ -300,13 +187,6 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Gestione dell'indicatore BAC
-    const bacIndicator = document.querySelector('.bac-indicator');
-    if (bacIndicator) {
-        const position = bacIndicator.dataset.position;
-        bacIndicator.style.left = `${position}%`;
-    }
-
     // Gestione delle barre di progresso
     const progressBars = document.querySelectorAll('.progress-bar');
     progressBars.forEach(bar => {
