@@ -4,7 +4,8 @@
 
 {% block content %}
 <div class="container py-5">
-    <div class="row justify-content-center">
+    <div class="row">
+        <!-- Form principale a sinistra -->
         <div class="col-md-8">
             <div class="card shadow">
                 <div class="card-body">
@@ -27,15 +28,15 @@
                             </label>
                             <input type="number" class="form-control" id="gradazione" name="gradazione" 
                                    min="0" max="100" step="0.1" required>
-                            <div class="form-text">Inserisci la percentuale di alcol nel drink</div>
+                            <div class="form-text">Inserisci la percentuale di alcol nel drink usando la virgola (es. 12,5)</div>
                         </div>
 
                         <div class="mb-3">
-                            <label for="descrizione" class="form-label">
-                                <i class="bi bi-card-text me-2"></i>Descrizione
+                            <label for="ingredienti" class="form-label">
+                                <i class="bi bi-card-text me-2"></i>Ingredienti
                             </label>
-                            <textarea class="form-control" id="descrizione" name="descrizione" rows="3"></textarea>
-                            <div class="form-text">Breve descrizione degli ingredienti e del drink</div>
+                            <textarea class="form-control" id="ingredienti" name="ingredienti" rows="3"></textarea>
+                            <div class="form-text">Lista degli ingredienti del drink</div>
                         </div>
 
                         <div class="mb-3">
@@ -46,6 +47,16 @@
                                 </label>
                             </div>
                             <div class="form-text">Deseleziona se il drink non contiene alcol</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="speciale" name="speciale">
+                                <label class="form-check-label" for="speciale">
+                                    <i class="bi bi-star me-2"></i>Drink Speciale
+                                </label>
+                            </div>
+                            <div class="form-text">Seleziona se è un drink speciale della casa</div>
                         </div>
 
                         <div class="d-grid gap-2">
@@ -72,17 +83,25 @@
                                     <th>Nome</th>
                                     <th>Gradazione</th>
                                     <th>Alcolico</th>
+                                    <th>Speciale</th>
                                     <th>Azioni</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for drink in drinks %}
                                 <tr>
-                                    <td>{{ drink.nome }}</td>
-                                    <td>{{ drink.gradazione }}%</td>
+                                    <td>{{ drink.fields.Name }}</td>
+                                    <td>{{ drink.fields.Gradazione }}%</td>
                                     <td>
-                                        {% if drink.alcolico %}
+                                        {% if drink.fields['Alcolico (bool)'] == '1' %}
                                         <span class="badge bg-success">Sì</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">No</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if drink.fields['Speciale (bool)'] == '1' %}
+                                        <span class="badge bg-warning">Sì</span>
                                         {% else %}
                                         <span class="badge bg-secondary">No</span>
                                         {% endif %}
@@ -110,6 +129,34 @@
                 </div>
             </div>
         </div>
+
+        <!-- Drink Standard -->
+        <div class="col-md-4">
+            <div class="card sticky-top" style="top: 20px;">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-list-check me-2"></i>Drink Standard
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-text mb-3">Seleziona i drink standard che vuoi includere nel menu</div>
+                    <div class="drinks-list">
+                        {% for drink in non_special_drinks %}
+                        <div class="form-check mb-2 {% if drink.is_linked %}text-primary{% endif %}">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="drink_{{ drink.id }}" 
+                                   name="selected_drinks" 
+                                   value="{{ drink.id }}"
+                                   {% if drink.is_linked %}checked{% endif %}>
+                            <label class="form-check-label" for="drink_{{ drink.id }}">
+                                {{ drink.fields.Name }} ({{ drink.fields.Gradazione }}%)
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -126,6 +173,53 @@ function deleteDrink(drinkId) {
         console.log('Elimina drink:', drinkId);
     }
 }
+
+// Gestione dei drink standard
+document.addEventListener('DOMContentLoaded', function() {
+    const drinkCheckboxes = document.querySelectorAll('input[name="selected_drinks"]');
+    let selectedDrinks = new Set();
+
+    // Inizializza i drink già selezionati
+    drinkCheckboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            selectedDrinks.add(checkbox.value);
+        }
+    });
+
+    drinkCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                selectedDrinks.add(this.value);
+            } else {
+                selectedDrinks.delete(this.value);
+            }
+            
+            // Invia i drink selezionati al backend
+            fetch('/link_drinks_to_bar', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    drink_ids: Array.from(selectedDrinks)
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Ricarica la pagina per mostrare i drink aggiornati
+                    window.location.reload();
+                } else {
+                    alert('Errore durante il collegamento dei drink: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Si è verificato un errore durante il collegamento dei drink');
+            });
+        });
+    });
+});
 </script>
 {% endblock %}
 

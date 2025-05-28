@@ -335,6 +335,13 @@ def get_drinks(bar_id=None):
     response = requests.get(url, headers=get_airtable_headers())
     drinks = response.json()['records']
     
+    # Processa i drink per assicurarsi che il campo Speciale sia sempre presente
+    for drink in drinks:
+        if 'fields' in drink:
+            # Se il campo Speciale non esiste, impostalo a False
+            if 'Speciale' not in drink['fields']:
+                drink['fields']['Speciale'] = False
+    
     if bar_id:
         filtered_drinks = [d for d in drinks if bar_id in d['fields'].get('Bar', [])]
         return filtered_drinks
@@ -1998,6 +2005,8 @@ def register_partner():
         address = request.form['address']
         city = request.form['city']
 
+        logger.info(f"[REGISTER_PARTNER] Tentativo di registrazione per: {bar_name} ({email})")
+
         # Validate password
         if len(password) < 8:
             flash('La password deve contenere almeno 8 caratteri')
@@ -2033,12 +2042,29 @@ def register_partner():
             }
         }
 
-        # Add to Airtable
+        # Add to Locali table
         response = requests.post(url, headers=headers, json=new_bar)
         
         if response.status_code == 200:
-            flash('Registrazione completata con successo! Puoi effettuare il login con le tue credenziali.')
-            return redirect(url_for('home'))
+            # Now create the corresponding Bar record with only necessary fields
+            bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+            new_bar_record = {
+                'fields': {
+                    'Name': bar_name,
+                    'Città': city,
+                    'Indirizzo': address
+                }
+            }
+            
+            # Add to Bar table
+            bar_response = requests.post(bar_url, headers=headers, json=new_bar_record)
+            
+            if bar_response.status_code == 200:
+                flash('Registrazione completata con successo! Puoi effettuare il login con le tue credenziali.')
+                return redirect(url_for('home'))
+            else:
+                flash('Si è verificato un errore durante la sincronizzazione dei dati. Riprova più tardi.')
+                return redirect(url_for('partner'))
         else:
             flash('Si è verificato un errore durante la registrazione. Riprova più tardi.')
             return redirect(url_for('partner'))
@@ -2058,10 +2084,38 @@ def registra_drink():
     
     if request.method == 'POST':
         try:
+            # Recupera i dati dal form
             nome = request.form['nome']
             gradazione = float(request.form['gradazione'])
-            descrizione = request.form.get('descrizione', '')
+            ingredienti = request.form.get('ingredienti', '')
             alcolico = 'alcolico' in request.form
+            speciale = 'speciale' in request.form
+            
+            logger.info(f"[REGISTRA_DRINK] Tentativo di registrazione drink: {nome}")
+            
+            # Ottieni il record del locale
+            locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+            locale_response = requests.get(locale_url, headers=get_airtable_headers())
+            
+            if locale_response.status_code != 200:
+                logger.error(f"[REGISTRA_DRINK] Errore nel recupero del locale: {locale_response.status_code}")
+                flash('Errore durante la registrazione del drink', 'danger')
+                return redirect(url_for('registra_drink'))
+            
+            locale_data = locale_response.json()
+            locale_name = locale_data['fields'].get('Name')
+            
+            # Cerca il bar corrispondente usando il nome
+            bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+            bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+            bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+            
+            if bar_response.status_code != 200 or not bar_response.json().get('records'):
+                logger.error(f"[REGISTRA_DRINK] Errore nel recupero del bar: {bar_response.status_code}")
+                flash('Errore durante la registrazione del drink', 'danger')
+                return redirect(url_for('registra_drink'))
+            
+            bar_id = bar_response.json()['records'][0]['id']
             
             # Crea il nuovo drink in Airtable
             url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
@@ -2070,27 +2124,67 @@ def registra_drink():
                     'fields': {
                         'Name': nome,
                         'Gradazione': gradazione,
-                        'Descrizione': descrizione,
+                        'Ingredienti': ingredienti,
                         'Alcolico (bool)': '1' if alcolico else '0',
-                        'Bar': [session['user']]  # Associa il drink al bar corrente
+                        'Speciale (bool)': '1' if speciale else '0',
+                        'Bar': [bar_id]
                     }
                 }]
             }
             
+            logger.info(f"[REGISTRA_DRINK] Dati da inviare ad Airtable: {data}")
+            
             response = requests.post(url, headers=get_airtable_headers(), json=data)
             
             if response.status_code == 200:
+                logger.info(f"[REGISTRA_DRINK] Drink registrato con successo: {nome}")
                 flash('Drink registrato con successo!', 'success')
             else:
+                logger.error(f"[REGISTRA_DRINK] Errore Airtable: {response.status_code} - {response.text}")
                 flash('Errore durante la registrazione del drink', 'danger')
                 
         except Exception as e:
             logger.error(f"[REGISTRA_DRINK] Errore: {str(e)}")
             flash('Si è verificato un errore durante la registrazione', 'danger')
     
-    # Recupera i drink del bar
-    drinks = get_drinks(session['user'])
-    return render_template('registra_drink.html', drinks=drinks)
+    # Recupera il nome del locale loggato
+    locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+    locale_response = requests.get(locale_url, headers=get_airtable_headers())
+    locale_data = locale_response.json()
+    locale_name = locale_data['fields'].get('Name')
+    
+    # Cerca il bar corrispondente usando il nome
+    bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+    bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+    bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+    
+    if bar_response.status_code == 200 and bar_response.json().get('records'):
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutti i drink associati a questo bar
+        drinks_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+        drinks_response = requests.get(drinks_url, headers=get_airtable_headers())
+        
+        if drinks_response.status_code == 200:
+            all_drinks = drinks_response.json().get('records', [])
+            # Filtra i drink per questo bar
+            drinks = [drink for drink in all_drinks if bar_id in drink['fields'].get('Bar', [])]
+        else:
+            drinks = []
+    else:
+        drinks = []
+    
+    # Recupera tutti i drink non speciali
+    url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+    response = requests.get(url, headers=get_airtable_headers())
+    all_drinks = response.json().get('records', [])
+    non_special_drinks = [drink for drink in all_drinks if drink['fields'].get('Speciale (bool)') == '0']
+    
+    # Marca i drink già collegati al bar
+    for drink in non_special_drinks:
+        drink['is_linked'] = bar_id in drink['fields'].get('Bar', [])
+    
+    return render_template('registra_drink.html', drinks=drinks, non_special_drinks=non_special_drinks)
 
 # Modifica il template base per mostrare menu diversi in base al tipo di utente
 @app.context_processor
@@ -2099,6 +2193,80 @@ def inject_user_type():
         'is_locale': session.get('user_type') == 'locale',
         'is_utente': session.get('user_type') == 'utente'
     }
+
+@app.route('/link_drinks_to_bar', methods=['POST'])
+@login_required
+def link_drinks_to_bar():
+    """Collega o scollega i drink standard al bar dell'utente"""
+    if session.get('user_type') != 'locale':
+        return jsonify({'success': False, 'error': 'Accesso non autorizzato'}), 403
+    
+    try:
+        # Recupera gli ID dei drink selezionati
+        selected_drinks = request.json.get('drink_ids', [])
+        
+        # Recupera il nome del locale loggato
+        locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+        locale_response = requests.get(locale_url, headers=get_airtable_headers())
+        locale_data = locale_response.json()
+        locale_name = locale_data['fields'].get('Name')
+        
+        # Cerca il bar corrispondente usando il nome
+        bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+        bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+        bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+        
+        if bar_response.status_code != 200 or not bar_response.json().get('records'):
+            return jsonify({'success': False, 'error': 'Bar non trovato'}), 404
+        
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutti i drink non speciali
+        drinks_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks'
+        drinks_response = requests.get(drinks_url, headers=get_airtable_headers())
+        all_drinks = drinks_response.json().get('records', [])
+        non_special_drinks = [drink for drink in all_drinks if drink['fields'].get('Speciale (bool)') == '0']
+        
+        # Per ogni drink non speciale
+        for drink in non_special_drinks:
+            drink_id = drink['id']
+            current_bars = drink['fields'].get('Bar', [])
+            
+            # Se il drink è tra quelli selezionati e non è già collegato al bar
+            if drink_id in selected_drinks and bar_id not in current_bars:
+                current_bars.append(bar_id)
+                # Aggiorna il drink per aggiungere il bar
+                update_data = {
+                    'fields': {
+                        'Bar': current_bars
+                    }
+                }
+                update_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks/{drink_id}'
+                update_response = requests.patch(update_url, headers=get_airtable_headers(), json=update_data)
+                
+                if update_response.status_code != 200:
+                    logger.error(f"Errore nell'aggiunta del bar al drink {drink_id}: {update_response.text}")
+            
+            # Se il drink non è tra quelli selezionati ed è collegato al bar
+            elif drink_id not in selected_drinks and bar_id in current_bars:
+                current_bars.remove(bar_id)
+                # Aggiorna il drink per rimuovere il bar
+                update_data = {
+                    'fields': {
+                        'Bar': current_bars
+                    }
+                }
+                update_url = f'https://api.airtable.com/v0/{BASE_ID}/Drinks/{drink_id}'
+                update_response = requests.patch(update_url, headers=get_airtable_headers(), json=update_data)
+                
+                if update_response.status_code != 200:
+                    logger.error(f"Errore nella rimozione del bar dal drink {drink_id}: {update_response.text}")
+        
+        return jsonify({'success': True, 'message': 'Drink aggiornati con successo'})
+        
+    except Exception as e:
+        logger.error(f"Errore nell'aggiornamento dei drink: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
