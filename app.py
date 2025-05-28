@@ -102,6 +102,16 @@ class SessionManager:
         return session.get('active_consumazione_id')
     
     @staticmethod
+    def set_consumption_data(data):
+        """Salva i dati della consumazione attiva nella sessione"""
+        session['consumption_data'] = data
+    
+    @staticmethod
+    def get_consumption_data():
+        """Ottiene i dati della consumazione attiva dalla sessione"""
+        return session.get('consumption_data', {})
+    
+    @staticmethod
     def get_stomaco_state():
         """Ottiene lo stato dello stomaco"""
         return session.get('stomaco_state', 'pieno')  # Default a 'pieno'
@@ -1057,6 +1067,17 @@ def registra_sorso_ajax(consumazione_id):
         sorsi = get_sorsi_by_consumazione(consumazione_id)
         print(f"DEBUG - Trovati {len(sorsi)} sorsi")
         
+        # Aggiorna i dati nella sessione
+        consumption_data = SessionManager.get_consumption_data()
+        if consumption_data and consumption_data['id'] == consumazione_id:
+            consumption_data['sorsi'].append({
+                'volume': volume,
+                'timestamp': sorso['fields'].get('Ora inizio', ''),
+                'bac': float(sorso['fields'].get('BAC Temporaneo', 0))
+            })
+            consumption_data['volume_consumato'] = sum(float(s['volume']) for s in consumption_data['sorsi'])
+            SessionManager.set_consumption_data(consumption_data)
+        
         return jsonify({
             'success': True,
             'sorso_id': sorso['id'] if sorso else None,
@@ -1155,6 +1176,9 @@ def finish_consumption():
         if response.status_code >= 400:
             raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
         
+        # Rimuovi l'ID della consumazione attiva dalla sessione
+        SessionManager.set_active_consumption(None)
+        
         return jsonify({'success': True})
     
     except Exception as e:
@@ -1208,11 +1232,31 @@ def nuovo_drink():
             cities=cities
         )
     
+    # Se c'è una richiesta POST, verifica se c'è una consumazione attiva prima di procedere
+    if request.method == 'POST':
+        if consumazione_attiva:
+            flash('Hai già una consumazione attiva. Completa quella attuale prima di iniziarne una nuova.', 'warning')
+            return redirect(url_for('monitora_drink'))
+    
     # Inizializza le variabili per i template
     selected_city = None
     bars = []
     selected_bar_id = None
     drinks = []
+    
+    # Controlla se c'è un bar salvato nella sessione
+    bar_id_from_session = SessionManager.get_bar_id()
+    if bar_id_from_session:
+        # Recupera i dettagli del bar
+        bar_data = get_bar_by_id(bar_id_from_session)
+        if bar_data and 'fields' in bar_data:
+            selected_city = bar_data['fields'].get('Città')
+            selected_bar_id = bar_id_from_session
+            # Recupera i bar per la città selezionata
+            if selected_city:
+                bars = get_bars(selected_city)
+                # Recupera i drink per il bar selezionato
+                drinks = get_drinks(selected_bar_id)
     
     # Gestione della selezione della città
     if request.method == 'POST' and 'city' in request.form:
@@ -1294,6 +1338,22 @@ def monitora_drink():
     if consumazione_attiva:
         consumazione_id = consumazione_attiva['id']
         drink_id = consumazione_attiva['fields'].get('Drink', [''])[0] if 'Drink' in consumazione_attiva['fields'] else ''
+        bar_id = consumazione_attiva['fields'].get('Bar', [''])[0] if 'Bar' in consumazione_attiva['fields'] else ''
+        
+        # Recupera i dati dalla sessione
+        consumption_data = SessionManager.get_consumption_data()
+        if consumption_data and consumption_data['id'] == consumazione_id:
+            return render_template(
+                'monitora_drink.html',
+                drink_id=drink_id,
+                bar_id=bar_id,
+                drink_selezionato=get_drink_by_id(drink_id),
+                bar_selezionato=get_bar_by_id(bar_id) if bar_id else None,
+                consumazione_id=consumazione_id,
+                peso_iniziale=consumption_data['peso_iniziale'],
+                volume_consumato=consumption_data['volume_consumato'],
+                sorsi=consumption_data['sorsi']
+            )
     
     # Verifica che ci sia un drink_id valido
     if not drink_id:
@@ -1307,11 +1367,15 @@ def monitora_drink():
         flash('Drink non trovato', 'danger')
         return redirect(url_for('nuovo_drink'))
     
+    # Ottieni i dettagli del bar
+    bar_selezionato = get_bar_by_id(bar_id) if bar_id else None
+    
     return render_template(
         'monitora_drink.html',
         drink_id=drink_id,
         bar_id=bar_id,
         drink_selezionato=drink_selezionato,
+        bar_selezionato=bar_selezionato,
         consumazione_id=consumazione_id
     )
 
@@ -1428,6 +1492,22 @@ def create_consumption():
             raise Exception(f"Errore Airtable: {response.status_code} - {response.text}")
             
         consumazione = response.json()
+        
+        # Salva l'ID della consumazione attiva nella sessione
+        SessionManager.set_active_consumption(consumazione['id'])
+        
+        # Salva i dati della consumazione nella sessione
+        consumption_data = {
+            'id': consumazione['id'],
+            'drink_id': drink_id,
+            'bar_id': bar_id,
+            'peso_iniziale': peso_iniziale,
+            'volume_consumato': 0,
+            'sorsi': [],
+            'bac': bac,
+            'stomaco': stomaco
+        }
+        SessionManager.set_consumption_data(consumption_data)
         
         return jsonify({
             'success': True,
@@ -2266,6 +2346,144 @@ def link_drinks_to_bar():
         
     except Exception as e:
         logger.error(f"Errore nell'aggiornamento dei drink: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/statistica')
+@login_required
+def statistica():
+    """Pagina delle statistiche per i bar"""
+    # Verifica che l'utente sia un locale
+    if session.get('user_type') != 'locale':
+        flash('Accesso non autorizzato')
+        return redirect(url_for('home'))
+    
+    try:
+        # Recupera il nome del locale loggato
+        locale_url = f'https://api.airtable.com/v0/{BASE_ID}/Locali/{session["user"]}'
+        locale_response = requests.get(locale_url, headers=get_airtable_headers())
+        locale_data = locale_response.json()
+        locale_name = locale_data['fields'].get('Name')
+        
+        # Cerca il bar corrispondente usando il nome
+        bar_url = f'https://api.airtable.com/v0/{BASE_ID}/Bar'
+        bar_params = {'filterByFormula': f"{{Name}}='{locale_name}'"}
+        bar_response = requests.get(bar_url, headers=get_airtable_headers(), params=bar_params)
+        
+        if bar_response.status_code != 200 or not bar_response.json().get('records'):
+            flash('Errore nel recupero dei dati del bar', 'danger')
+            return redirect(url_for('home'))
+        
+        bar_id = bar_response.json()['records'][0]['id']
+        
+        # Recupera tutte le consumazioni per questo bar
+        consumazioni = get_user_consumazioni(bar_id=bar_id)
+        
+        # Inizializza le variabili per le statistiche
+        totale_consumazioni = len(consumazioni)
+        drink_stats = {}
+        bac_values = []
+        totale_sorsi = 0
+        
+        # Analizza ogni consumazione
+        for cons in consumazioni:
+            drink_id = cons['fields'].get('Drink', [''])[0]
+            if drink_id:
+                drink = get_drink_by_id(drink_id)
+                if drink:
+                    drink_name = drink['fields'].get('Name', 'Sconosciuto')
+                    if drink_name not in drink_stats:
+                        drink_stats[drink_name] = {
+                            'consumazioni': 0,
+                            'sorsi': 0,
+                            'tassi': [],
+                            'positivi': 0
+                        }
+                    
+                    drink_stats[drink_name]['consumazioni'] += 1
+                    
+                    # Recupera i sorsi per questa consumazione
+                    sorsi = get_sorsi_by_consumazione(cons['id'])
+                    drink_stats[drink_name]['sorsi'] += len(sorsi)
+                    totale_sorsi += len(sorsi)
+                    
+                    # Analizza i tassi alcolemici
+                    for sorso in sorsi:
+                        bac = float(sorso['fields'].get('BAC Temporaneo', 0))
+                        drink_stats[drink_name]['tassi'].append(bac)
+                        bac_values.append(bac)
+                        if bac > 0.5:  # Limite legale
+                            drink_stats[drink_name]['positivi'] += 1
+        
+        # Calcola le statistiche generali
+        media_sorsi_per_drink = totale_sorsi / totale_consumazioni if totale_consumazioni > 0 else 0
+        tasso_medio = sum(bac_values) / len(bac_values) if bac_values else 0
+        
+        # Prepara i dati per i grafici
+        drink_labels = []
+        drink_data = []
+        dettaglio_drink = []
+        
+        for drink_name, stats in sorted(drink_stats.items(), key=lambda x: x[1]['consumazioni'], reverse=True):
+            drink_labels.append(drink_name)
+            drink_data.append(stats['consumazioni'])
+            
+            # Calcola le statistiche per drink
+            media_sorsi = stats['sorsi'] / stats['consumazioni'] if stats['consumazioni'] > 0 else 0
+            tasso_medio_drink = sum(stats['tassi']) / len(stats['tassi']) if stats['tassi'] else 0
+            percentuale_positivi = (stats['positivi'] / stats['consumazioni'] * 100) if stats['consumazioni'] > 0 else 0
+            
+            dettaglio_drink.append({
+                'nome': drink_name,
+                'consumazioni': stats['consumazioni'],
+                'media_sorsi': media_sorsi,
+                'tasso_medio': tasso_medio_drink,
+                'percentuale_positivi': percentuale_positivi
+            })
+        
+        # Prepara i dati per il grafico della distribuzione BAC
+        bac_ranges = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0), (1.0, float('inf'))]
+        bac_labels = ['0-0.2', '0.2-0.4', '0.4-0.6', '0.6-0.8', '0.8-1.0', '>1.0']
+        bac_data = [0] * len(bac_ranges)
+        
+        for bac in bac_values:
+            for i, (min_bac, max_bac) in enumerate(bac_ranges):
+                if min_bac <= bac < max_bac:
+                    bac_data[i] += 1
+                    break
+        
+        return render_template('statistica.html',
+                             totale_consumazioni=totale_consumazioni,
+                             drink_popolari=drink_labels[:5],
+                             media_sorsi_per_drink=media_sorsi_per_drink,
+                             tasso_medio=tasso_medio,
+                             drink_labels=drink_labels,
+                             drink_data=drink_data,
+                             bac_labels=bac_labels,
+                             bac_data=bac_data,
+                             dettaglio_drink=dettaglio_drink)
+                             
+    except Exception as e:
+        logger.error(f"Errore nella pagina statistiche: {str(e)}")
+        flash('Si è verificato un errore nel caricamento delle statistiche', 'danger')
+        return redirect(url_for('home'))
+
+@app.route('/set_selected_bar', methods=['POST'])
+@login_required
+def set_selected_bar():
+    """Salva il bar selezionato nella sessione"""
+    try:
+        data = request.get_json()
+        bar_id = data.get('bar_id')
+        
+        if not bar_id:
+            return jsonify({'success': False, 'error': 'Bar ID non fornito'}), 400
+            
+        # Salva il bar nella sessione
+        SessionManager.set_bar_id(bar_id)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Errore nel salvataggio del bar selezionato: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':

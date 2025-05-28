@@ -157,7 +157,7 @@
                                     <select class="form-select" id="city" name="city">
                                         <option value="">Seleziona una città</option>
                                         {% for city in cities %}
-                                        <option value="{{ city }}">{{ city }}</option>
+                                        <option value="{{ city }}" {% if city == selected_city %}selected{% endif %}>{{ city }}</option>
                                         {% endfor %}
                                     </select>
                                     <label for="city">
@@ -169,8 +169,11 @@
                             <!-- Selezione Bar -->
                             <div class="col-md-4">
                                 <div class="form-floating">
-                                    <select class="form-select" id="bar" name="bar_id" disabled>
-                                        <option value="">Seleziona prima una città</option>
+                                    <select class="form-select" id="bar" name="bar_id" {% if not selected_city %}disabled{% endif %}>
+                                        <option value="">{% if not selected_city %}Seleziona prima una città{% else %}Seleziona un bar{% endif %}</option>
+                                        {% for bar in bars %}
+                                        <option value="{{ bar.id }}" {% if bar.id == selected_bar_id %}selected{% endif %}>{{ bar.fields.Name }}</option>
+                                        {% endfor %}
                                     </select>
                                     <label for="bar">
                                         <i class="fas fa-glass-martini-alt me-2"></i>Bar
@@ -181,8 +184,11 @@
                             <!-- Selezione Drink -->
                             <div class="col-md-4">
                                 <div class="form-floating">
-                                    <select class="form-select" id="drink" name="drink_id" disabled>
-                                        <option value="">Seleziona prima un bar</option>
+                                    <select class="form-select" id="drink" name="drink_id" {% if not selected_bar_id %}disabled{% endif %}>
+                                        <option value="">{% if not selected_bar_id %}Seleziona prima un bar{% else %}Seleziona un drink{% endif %}</option>
+                                        {% for drink in drinks %}
+                                        <option value="{{ drink.id }}">{{ drink.fields.Name }} ({{ drink.fields.Gradazione }}%)</option>
+                                        {% endfor %}
                                     </select>
                                     <label for="drink">
                                         <i class="fas fa-wine-glass-alt me-2"></i>Drink
@@ -312,8 +318,29 @@ document.addEventListener('DOMContentLoaded', function() {
             stomaco: formData.get('stomaco')
         };
 
-        // Reindirizza alla pagina di monitoraggio
-        window.location.href = `/monitora_drink?drink_id=${data.drink_id}&bar_id=${data.bar_id}`;
+        // Prima salva il bar nella sessione
+        fetch('/set_selected_bar', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                bar_id: data.bar_id
+            })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                // Poi reindirizza alla pagina di monitoraggio
+                window.location.href = `/monitora_drink?drink_id=${data.drink_id}&bar_id=${data.bar_id}`;
+            } else {
+                alert('Errore durante il salvataggio del bar selezionato');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Si è verificato un errore durante il salvataggio del bar selezionato');
+        });
     });
 });
 </script>
